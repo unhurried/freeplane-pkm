@@ -29,7 +29,7 @@
             <kind name="item" />
         </kindList>
         <scope>
-            <include nonRecursive="false" path="${note_dir}" />
+            <include nonRecursive="false" path="${page_dir}" />
         </scope>
     </query>
 </persistedQuery>
