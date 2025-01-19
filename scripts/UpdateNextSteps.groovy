@@ -17,10 +17,11 @@ pageFile.withReader { reader ->
         if (line == '### Next Steps') break
     }
 
+    for (c in node.getChildren()) c.delete()
+
     while ((line = reader.readLine()) != null) {
         if (line.startsWith('#')) break
         if (line.startsWith('* ') && line.length() > 3) {
-            for (c in node.getChildren()) c.delete()
             def newNode = node.createChild()
             newNode.text = line.substring(2)
             break
