@@ -36,7 +36,7 @@ pageAssetsDir.mkdir()
 def pageText = templateFile.text
 def pageAssetsName = pageAssetsDir.getName()
 pageText = pageText.replace('${page_assets_name}', pageAssetsName)
-def today = new Date().format('yyyy/MM/dd')
+def today = new Date().format('yy/MM/dd')
 pageText = pageText.replace('${today}', today)
 
 pageFile.createNewFile()
