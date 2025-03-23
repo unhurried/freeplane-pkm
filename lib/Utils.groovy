@@ -1,9 +1,9 @@
 def static loadPageDirPath(c, ui) {
-
     def configNode
     for (child in c.getViewRoot().children) {
         if (child.text == 'config') {
             configNode = child
+            break
         }
     }
 
@@ -25,4 +25,28 @@ def static loadPageDirPath(c, ui) {
     }
 
     return pageDirPath
+}
+
+def static updateNextSteps(pageFile, node) {
+    pageFile.withReader { reader ->
+        while (true) {
+            String ln = reader.readLine()
+            if (ln == null || ln == '### Next Steps') break
+        }
+
+        for (c in node.getChildren()) c.delete()
+
+        int cnt = 0
+        while (true) {
+            String ln = reader.readLine()
+            if (ln == null || ln.startsWith('#')) break
+
+            if ((ln.startsWith('* ') || ln.startsWith('- ')) && ln.length() > 3) {
+                def newNode = node.createChild()
+                newNode.text = ln.substring(2)
+                cnt++
+                if (cnt == 3) break
+            }
+        }
+    }
 }

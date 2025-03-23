@@ -11,7 +11,7 @@ if (!ToDoNode) {
     return
 }
  
-def newNode = ToDoNode.createChild()
+def newNode = ToDoNode.createChild(0)
 newNode.text = node.text
 newNode.link.node = node
 c.select(newNode)
