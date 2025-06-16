@@ -10,7 +10,9 @@ keyword = ui.showInputDialog(node.delegate, message, null)
 if (keyword == null || keyword.isEmpty()) {
     node.map.filter(true, true){ true }
 } else if (keyword == 't') {
-    node.map.filter(true, true){ it.text.contains("ToDo") }
+    node.map.filter(true, true){ 
+        it.getParent() != null && it.getParent().getParent() == null && it.text.equals("ToDo")
+    }
 } else if (keyword == 'd') {
     today = LocalDate.now()
     node.map.filter(true, true){ 

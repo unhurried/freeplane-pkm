@@ -1,16 +1,12 @@
-def static loadPageDirPath(c, ui) {
+def static loadPageDir(node) {
     def configNode
-    for (child in c.getViewRoot().children) {
+    for (child in node.mindMap.root.children) {
         if (child.text == 'config') {
             configNode = child
             break
         }
     }
-
-    if (!configNode) {
-        ui.errorMessage('config node is missing.')
-        return
-    }
+    if (!configNode) throw new RuntimeException('config node is missing.')
 
     def pageDirPath
     for (child in configNode.children) {
@@ -18,16 +14,41 @@ def static loadPageDirPath(c, ui) {
             pageDirPath = child.children[0].plainText
         }
     }
+    if (!pageDirPath) throw new RuntimeException('pageDirPath node is missing.')
 
-    if (!pageDirPath) {
-        ui.errorMessage('pageDirPath node is missing.')
-        return
-    }
+    def pageDir = new File(pageDirPath)
+    if (!pageDir.exists()) throw new RuntimeException('page directory is missing.')
 
-    return pageDirPath
+    return pageDir
 }
 
-def static updateNextSteps(pageFile, node) {
+def static getPageFile(node) {
+    // Look for a file linked from the node.
+    def pageFile
+    if (node.link.node && node.link.node.link.file) {
+        pageFile = node.link.node.link.file
+    } else if (node.link.file) {
+        pageFile = node.link.file
+    } else {
+        return null
+    }
+
+    // Ignore the file if it doesn't match the node text.
+    def pageDir = Utils.loadPageDir(node)
+    def pageName = node.text
+    if (pageFile != new File(pageDir, pageName + '.md')) return null
+
+    // Alert if pageFile doesn't exist.
+    if (!pageFile.exists()) throw new RuntimeException('page file is missing.')
+
+    return pageFile
+}
+
+
+def static updateNextSteps(node) {
+    def pageFile = Utils.getPageFile(node)
+    if (!pageFile) return 
+
     pageFile.withReader { reader ->
         while (true) {
             String ln = reader.readLine()

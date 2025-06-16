@@ -1,13 +1,6 @@
 import javax.swing.JOptionPane
 
-def pageDirPath = Utils.loadPageDirPath(c, ui)
-
-def pageDir = new File(pageDirPath)
-if (!pageDir.exists()) {
-    ui.errorMessage('page directory is missimg.')
-    return
-}
-
+def pageDir = Utils.loadPageDir(node)
 def pageName = node.text
 
 def pageFile = new File(pageDir, pageName + '.md')

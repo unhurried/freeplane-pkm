@@ -1,4 +1,4 @@
-def pageDirPath = Utils.loadPageDirPath(c, ui)
+def pageDir = Utils.loadPageDir(node)
 
 def pageName = node.text
 if (pageName =~ '[\\\\/:*?"><|]') {
@@ -9,12 +9,6 @@ if (pageName =~ '[\\\\/:*?"><|]') {
 def templateFile = new File(c.getUserDirectory(), 'scripts/template.md')
 if (!templateFile.exists()) {
     ui.errorMessage('template file is missimg.')
-    return
-}
-
-def pageDir = new File(pageDirPath)
-if (!pageDir.exists()) {
-    ui.errorMessage('page directory is missimg.')
     return
 }
 

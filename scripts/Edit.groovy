@@ -2,12 +2,7 @@ import javax.swing.JOptionPane
 import org.freeplane.core.ui.components.UITools
 
 def pageName = node.text
-def pageDirPath = Utils.loadPageDirPath(c, ui)
-def pageDir = new File(pageDirPath)
-if (!pageDir.exists()) {
-    ui.errorMessage('page directory is missimg.')
-    return
-}
+def pageDir = Utils.loadPageDir(node)
 
 def pageFile = new File(pageDir, pageName + '.md')
 if (!pageFile.exists()) {

@@ -1,7 +1,3 @@
-def pageDirPath = Utils.loadPageDirPath(c, ui)
-
-def pageName = node.text
-
 def newPageName = ui.showInputDialog(node.delegate, "New Page Name", null)
 if (newPageName == null || newPageName.isEmpty()) {
     return
@@ -11,11 +7,8 @@ if (newPageName =~ '[\\\\/:*?"><|]') {
     return
 }
 
-def pageDir = new File(pageDirPath)
-if (!pageDir.exists()) {
-    ui.errorMessage('page directory is missimg.')
-    return
-}
+def pageName = node.text
+def pageDir = Utils.loadPageDir(node)
 
 def pageFile = new File(pageDir, pageName + '.md')
 if (!pageFile.exists()) {

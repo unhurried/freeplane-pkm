@@ -1,15 +1,3 @@
-def pageName = node.text
-def pageDirPath = Utils.loadPageDirPath(c, ui)
-def pageDir = new File(pageDirPath)
-if (!pageDir.exists()) {
-    ui.errorMessage('page directory is missimg.')
-    return
+c.findAll().each {
+    Utils.updateNextSteps(it)
 }
-
-def pageFile = new File(pageDir, pageName + '.md')
-if (!pageFile.exists()) {
-    ui.errorMessage('page file is missing.')
-    return
-}
-
-Utils.updateNextSteps(pageFile, node)
