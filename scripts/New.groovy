@@ -1,4 +1,4 @@
-def pageDir = Utils.loadPageDir(node)
+def docDir = Utils.loadDocDir(node)
 
 def pageName = node.text
 if (pageName =~ '[\\\\/:*?"><|]') {
@@ -12,14 +12,14 @@ if (!templateFile.exists()) {
     return
 }
 
-def pageFile = new File(pageDir, pageName + '.md')
+def pageFile = new File(docDir, pageName + '.md')
 if (pageFile.exists()) {
     node.link.file = pageFile
     ui.errorMessage('page file already exists.')
     return
 }
 
-def pageAssetsDir = new File(pageDir, pageName + '.assets')
+def pageAssetsDir = new File(docDir, pageName + '.assets')
 if (pageAssetsDir.exists()) {
     ui.errorMessage('page assets directory already exists.')
     return

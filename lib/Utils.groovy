@@ -1,4 +1,9 @@
-def static loadPageDir(node) {
+import groovy.transform.Field
+
+@Field static final DOC_TARGET_PAGE = 'page'
+@Field static final DOC_TARGET_DIRECTORY = 'directory'
+
+def static loadDocDir(node) {
     def configNode
     for (child in node.mindMap.root.children) {
         if (child.text == 'config') {
@@ -8,35 +13,59 @@ def static loadPageDir(node) {
     }
     if (!configNode) throw new RuntimeException('config node is missing.')
 
-    def pageDirPath
+    def docDirPath
     for (child in configNode.children) {
-        if (child.text == 'pageDirPath' && child.children[0]) {
-            pageDirPath = child.children[0].plainText
+        if ((child.text == 'docDirPath' || child.text == 'pageDirPath') && child.children[0]) {
+            docDirPath = child.children[0].plainText
         }
     }
-    if (!pageDirPath) throw new RuntimeException('pageDirPath node is missing.')
+    if (!docDirPath) throw new RuntimeException('docDirPath node is missing.')
 
-    def pageDir = new File(pageDirPath)
-    if (!pageDir.exists()) throw new RuntimeException('page directory is missing.')
+    def docDir = new File(docDirPath)
+    if (!docDir.exists()) throw new RuntimeException('document directory is missing.')
 
-    return pageDir
+    return docDir
+}
+
+def static getLinkedFile(node) {
+    if (node.link.node && node.link.node.link.file) {
+        return node.link.node.link.file
+    }
+    if (node.link.file) {
+        return node.link.file
+    }
+
+    return null
+}
+
+def static getDocNodeType(node) {
+    def linkedFile = Utils.getLinkedFile(node)
+    if (!linkedFile?.exists()) return null
+
+    def docDir = Utils.loadDocDir(node)
+    def docName = node.text
+    def pageFile = new File(docDir, docName + '.md')
+    if (linkedFile == pageFile && pageFile.exists()) {
+        return Utils.DOC_TARGET_PAGE
+    }
+
+    def directoryDir = new File(docDir, docName)
+    if (linkedFile == directoryDir && directoryDir.exists() && directoryDir.isDirectory()) {
+        return Utils.DOC_TARGET_DIRECTORY
+    }
+
+    return null
 }
 
 def static getPageFile(node) {
     // Look for a file linked from the node.
-    def pageFile
-    if (node.link.node && node.link.node.link.file) {
-        pageFile = node.link.node.link.file
-    } else if (node.link.file) {
-        pageFile = node.link.file
-    } else {
-        return null
-    }
+    def pageFile = Utils.getLinkedFile(node)
+    if (!pageFile) return null
 
     // Ignore the file if it doesn't match the node text.
-    def pageDir = Utils.loadPageDir(node)
+    def docDir = Utils.loadDocDir(node)
     def pageName = node.text
-    if (pageFile != new File(pageDir, pageName + '.md')) return null
+    if (pageFile != new File(docDir, pageName + '.md')) return null
 
     // Alert if pageFile doesn't exist.
     if (!pageFile.exists()) throw new RuntimeException('page file is missing.')

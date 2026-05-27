@@ -1,4 +1,4 @@
-def pageDir = Utils.loadPageDir(node)
+def docDir = Utils.loadDocDir(node)
 
 def templateFile = new File(c.getUserDirectory(), 'scripts/find.search-ms.template')
 if (!templateFile.exists()) {
@@ -12,7 +12,7 @@ if (keyword == null || keyword.isEmpty()) {
 }
 
 def searchText = templateFile.text
-searchText = searchText.replace('${page_dir}', pageDir.path)
+searchText = searchText.replace('${page_dir}', docDir.path)
 searchText = searchText.replace('${keyword}', keyword)
 
 tempFile = File.createTempFile("find.", ".search-ms")
