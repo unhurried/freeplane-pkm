@@ -1,14 +1,15 @@
 def docDir = Utils.loadDocDir(node)
-
 def pageName = node.text
-if (pageName =~ '[\\\\/:*?"><|]') {
+
+def INVALID_CHARS_PATTERN = '[\\\\/:*?"><|]'
+if (pageName =~ INVALID_CHARS_PATTERN) {
     ui.errorMessage('page name includes invalid characters')
     return
 }
 
 def templateFile = new File(c.getUserDirectory(), 'scripts/template.md')
 if (!templateFile.exists()) {
-    ui.errorMessage('template file is missimg.')
+    ui.errorMessage('template file is missing.')
     return
 }
 
@@ -28,15 +29,12 @@ if (pageAssetsDir.exists()) {
 pageAssetsDir.mkdir()
 
 def pageText = templateFile.text
-def pageAssetsName = pageAssetsDir.getName()
-pageText = pageText.replace('${page_assets_name}', pageAssetsName)
-def today = new Date().format('yy/MM/dd')
-pageText = pageText.replace('${today}', today)
+pageText = pageText.replace('${page_assets_name}', pageAssetsDir.getName())
+pageText = pageText.replace('${today}', new Date().format('yy/MM/dd'))
 
-pageFile.createNewFile()
-byte[] BOM = [ (byte) 0xEF, (byte) 0xBB, (byte) 0xBF ];
-pageFile.append(BOM)
-pageFile.append(pageText, "UTF-8")
+byte[] BOM = [(byte) 0xEF, (byte) 0xBB, (byte) 0xBF]
+pageFile.bytes = BOM
+pageFile.append(pageText, 'UTF-8')
 
 node.link.file = pageFile
 java.awt.Desktop.getDesktop().open(pageFile)

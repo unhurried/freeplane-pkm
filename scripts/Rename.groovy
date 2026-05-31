@@ -37,9 +37,8 @@ def renamePage(ui, node, docDir, pageName, newName) {
     pageText = pageText.replaceAll(pageName + '.md', newName + '.md')
     pageText = pageText.replaceAll(pageName + '.assets', newName + '.assets')
 
-    newPageFile.createNewFile()
-    byte[] BOM = [ (byte) 0xEF, (byte) 0xBB, (byte) 0xBF ]
-    newPageFile.setBytes(BOM)
+    byte[] BOM = [(byte) 0xEF, (byte) 0xBB, (byte) 0xBF]
+    newPageFile.bytes = BOM
     newPageFile.append(pageText, 'UTF-8')
 
     node.text = newName
@@ -68,11 +67,13 @@ def renameDirectory(ui, node, docDir, directoryName, newName) {
     node.link.file = newDirectoryDir
 }
 
+def INVALID_CHARS_PATTERN = '[\\/:*?"><|]'
+
 def newName = ui.showInputDialog(node.delegate, 'New Name', null)
 if (newName == null || newName.isEmpty()) {
     return
 }
-if (newName =~ '[\\/:*?"><|]') {
+if (newName =~ INVALID_CHARS_PATTERN) {
     ui.errorMessage('new name includes invalid characters')
     return
 }

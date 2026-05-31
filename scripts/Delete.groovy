@@ -13,10 +13,7 @@ def deletePage(ui, node, docDir, pageName) {
         return
     }
 
-    def option = ui.showConfirmDialog(node.delegate, 'Are you sure to delete "' + pageName + '"?', 'Delete', JOptionPane.YES_NO_OPTION)
-    if (option != JOptionPane.YES_OPTION) {
-        return
-    }
+    if (!confirmAction(ui, node, "Are you sure to delete \"${pageName}\"?")) return
 
     pageFile.delete()
     pageAssetsDir.deleteDir()
@@ -30,10 +27,7 @@ def deleteDirectory(ui, node, docDir, directoryName) {
         return
     }
 
-    def option = ui.showConfirmDialog(node.delegate, 'Are you sure to delete directory "' + directoryName + '"?', 'Delete', JOptionPane.YES_NO_OPTION)
-    if (option != JOptionPane.YES_OPTION) {
-        return
-    }
+    if (!confirmAction(ui, node, "Are you sure to delete directory \"${directoryName}\"?")) return
 
     if (!directoryDir.deleteDir()) {
         ui.errorMessage('failed to delete directory.')
@@ -41,6 +35,11 @@ def deleteDirectory(ui, node, docDir, directoryName) {
     }
 
     node.delete()
+}
+
+def confirmAction(ui, node, String message) {
+    def option = ui.showConfirmDialog(node.delegate, message, 'Delete', JOptionPane.YES_NO_OPTION)
+    return option == JOptionPane.YES_OPTION
 }
 
 def docDir = Utils.loadDocDir(node)

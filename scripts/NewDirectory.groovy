@@ -1,7 +1,8 @@
 def docDir = Utils.loadDocDir(node)
-
 def directoryName = node.text
-if (directoryName =~ '[\\\\/:*?"><|]') {
+
+def INVALID_CHARS_PATTERN = '[\\\\/:*?"><|]'
+if (directoryName =~ INVALID_CHARS_PATTERN) {
     ui.errorMessage('directory name includes invalid characters')
     return
 }

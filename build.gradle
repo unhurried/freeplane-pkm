@@ -1,0 +1,34 @@
+plugins {
+    id 'groovy'
+}
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    main {
+        groovy {
+            srcDirs = ['lib']
+        }
+    }
+    test {
+        groovy {
+            srcDirs = ['test']
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.apache.groovy:groovy:4.0.27'
+
+    testImplementation 'org.apache.groovy:groovy:4.0.27'
+    testImplementation platform('org.spockframework:spock-bom:2.4-M4-groovy-4.0')
+    testImplementation 'org.spockframework:spock-core'
+    testRuntimeOnly 'net.bytebuddy:byte-buddy:1.17.5'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
