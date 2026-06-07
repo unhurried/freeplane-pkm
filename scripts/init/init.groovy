@@ -1,4 +1,4 @@
-import java.time.LocalDateTime;  
+import java.time.LocalDateTime
 
 def maps = c.getOpenMindMaps()
 if (maps.size() != 1) return
@@ -14,10 +14,12 @@ map.addListener({
     if (updating) return
 
     updating = true
-    c.findAll().each {
-        Utils.updateNextSteps(it)
+    try {
+        c.findAll().each {
+            Utils.updateNextSteps(it)
+        }
+        lastUpdated = LocalDateTime.now()
+    } finally {
+        updating = false
     }
-
-    lastUpdated = LocalDateTime.now()
-    updating = false
 })

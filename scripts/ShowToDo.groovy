@@ -1,1 +1,1 @@
-node.map.filter(true, true){ it.text.contains("ToDo") }
+node.map.filter(true, true) { it.text.contains('ToDo') }
