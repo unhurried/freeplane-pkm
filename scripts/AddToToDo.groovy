@@ -11,7 +11,13 @@ if (!toDoNode) {
     return
 }
 
+// 親NodeがPage Nodeであることを確認する。
+if (Utils.getDocNodeType(node.parent) != Utils.DOC_TARGET_PAGE) {
+    ui.errorMessage('This is not a todo item.')
+    return
+}
+
 def newNode = toDoNode.createChild(0)
-newNode.text = node.text
-newNode.link.node = node
+newNode.text = node.text + " (" + node.parent.text + ")"
+newNode.link.file = node.parent.link.file
 c.select(newNode)
