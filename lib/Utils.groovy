@@ -88,7 +88,25 @@ def static updateNextSteps(node) {
     }
 }
 
+/**
+ * Recursively collects all files linked from nodes in the subtree rooted at the given node.
+ * Returns a Set of canonical File objects.
+ */
+def static collectLinkedFiles(node) {
+    def linkedFiles = new HashSet<File>()
+    collectLinkedFilesRecursive(node, linkedFiles)
+    return linkedFiles
+}
+
 // --- Private helper methods ---
+
+private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
+    def linkedFile = getLinkedFile(node)
+    if (linkedFile) linkedFiles.add(linkedFile.canonicalFile)
+    for (child in node.children) {
+        collectLinkedFilesRecursive(child, linkedFiles)
+    }
+}
 
 private static findChildByText(parentNode, String text) {
     return parentNode.children.find { it.text == text }

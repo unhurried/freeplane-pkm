@@ -398,6 +398,82 @@ class UtilsSpec extends Specification {
         children.size() == 0
     }
 
+    // --- Tests for collectLinkedFiles ---
+
+    def "collectLinkedFiles returns all directly linked files in the tree"() {
+        given:
+        def fileA = tempDir.resolve('a.md').toFile()
+        def fileB = tempDir.resolve('b.md').toFile()
+        fileA.createNewFile()
+        fileB.createNewFile()
+        def childA = createMockNode(linkFile: fileA)
+        def childB = createMockNode(linkFile: fileB)
+        def root = createMockNode(children: [childA, childB])
+
+        when:
+        def result = Utils.collectLinkedFiles(root)
+
+        then:
+        result == [fileA.canonicalFile, fileB.canonicalFile] as Set
+    }
+
+    def "collectLinkedFiles collects files from deeply nested children"() {
+        given:
+        def file = tempDir.resolve('deep.md').toFile()
+        file.createNewFile()
+        def leaf = createMockNode(linkFile: file)
+        def middle = createMockNode(children: [leaf])
+        def root = createMockNode(children: [middle])
+
+        when:
+        def result = Utils.collectLinkedFiles(root)
+
+        then:
+        result.contains(file.canonicalFile)
+    }
+
+    def "collectLinkedFiles skips nodes with no link"() {
+        given:
+        def file = tempDir.resolve('linked.md').toFile()
+        file.createNewFile()
+        def linkedChild = createMockNode(linkFile: file)
+        def unlinkedChild = createMockNode()
+        def root = createMockNode(children: [linkedChild, unlinkedChild])
+
+        when:
+        def result = Utils.collectLinkedFiles(root)
+
+        then:
+        result.size() == 1
+        result.contains(file.canonicalFile)
+    }
+
+    def "collectLinkedFiles includes files linked via intermediate node"() {
+        given:
+        def file = tempDir.resolve('via-node.md').toFile()
+        file.createNewFile()
+        def linkedNode = createMockNode(linkFile: file)
+        def child = createMockNode(linkNode: linkedNode)
+        def root = createMockNode(children: [child])
+
+        when:
+        def result = Utils.collectLinkedFiles(root)
+
+        then:
+        result.contains(file.canonicalFile)
+    }
+
+    def "collectLinkedFiles returns empty set when no links exist"() {
+        given:
+        def root = createMockNode(children: [createMockNode(), createMockNode()])
+
+        when:
+        def result = Utils.collectLinkedFiles(root)
+
+        then:
+        result.isEmpty()
+    }
+
     def "updateNextSteps clears existing children before adding new ones"() {
         given:
         def docDir = tempDir.resolve('docs').toFile()
