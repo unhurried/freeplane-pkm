@@ -8,15 +8,11 @@ def deletePage(ui, node, docDir, pageName) {
     }
 
     def pageAssetsDir = new File(docDir, pageName + '.assets')
-    if (!pageAssetsDir.exists()) {
-        ui.errorMessage('page assets directory is missing.')
-        return
-    }
 
     if (!confirmAction(ui, node, "Are you sure to delete \"${pageName}\"?")) return
 
     pageFile.delete()
-    pageAssetsDir.deleteDir()
+    if (pageAssetsDir.exists()) pageAssetsDir.deleteDir()
     node.delete()
 }
 
