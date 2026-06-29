@@ -6,10 +6,6 @@ def renamePage(ui, node, docDir, pageName, newName) {
     }
 
     def pageAssetsDir = new File(docDir, pageName + '.assets')
-    if (!pageAssetsDir.exists()) {
-        ui.errorMessage('page assets directory is missing.')
-        return
-    }
 
     def newPageFile = new File(docDir, newName + '.md')
     if (newPageFile.exists()) {
@@ -27,7 +23,7 @@ def renamePage(ui, node, docDir, pageName, newName) {
         ui.errorMessage('failed to rename page file.')
         return
     }
-    if (!pageAssetsDir.renameTo(newPageAssetsDir)) {
+    if (pageAssetsDir.exists() && !pageAssetsDir.renameTo(newPageAssetsDir)) {
         newPageFile.renameTo(pageFile)
         ui.errorMessage('failed to rename page assets directory.')
         return
