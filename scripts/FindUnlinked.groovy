@@ -1,4 +1,4 @@
-def UNLINKED_NODE_NAME = 'unlinked'
+def UNLINKED_NODE_NAME = 'unlinked pages / directories'
 
 def docDir = Utils.loadDocDir(node)
 
