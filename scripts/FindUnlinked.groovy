@@ -1,16 +1,22 @@
-def UNLINKED_NODE_NAME = 'unlinked pages / directories'
+def UNLINKED_NODE_NAME = 'unlinked'
 
 def docDir = Utils.loadDocDir(node)
 
 def linkedFiles = Utils.collectLinkedFiles(node.mindMap.root)
 
-def unlinkedFiles = []
+def unlinkedPages = []
 def unlinkedDirs = []
+def unlinkedAssets = []
 docDir.eachFile { file ->
     if (file.isFile() && file.name.endsWith('.md') && !linkedFiles.contains(file.canonicalFile)) {
-        unlinkedFiles << file
-    }
-    if (file.isDirectory() && !file.name.endsWith('.assets') && !linkedFiles.contains(file.canonicalFile)) {
+        unlinkedPages << file
+    } else if (file.isDirectory() && file.name.endsWith('.assets')) {
+        def baseName = file.name.replaceAll(/\.assets$/, '')
+        def pageFile = new File(docDir, baseName + '.md')
+        if (!pageFile.exists()) {
+            unlinkedAssets << file
+        }
+    } else if (file.isDirectory() && !linkedFiles.contains(file.canonicalFile)) {
         unlinkedDirs << file
     }
 }
@@ -27,14 +33,16 @@ if (!unlinkedNode) {
     }
 }
 
-unlinkedFiles.each { file ->
-    def childNode = unlinkedNode.createChild()
-    childNode.text = file.name.replaceAll(/\.md$/, '')
-    childNode.link.file = file
+def addCategory = { String label, List items, Closure nameOf ->
+    def catNode = unlinkedNode.createChild()
+    catNode.text = label
+    items.each { item ->
+        def childNode = catNode.createChild()
+        childNode.text = nameOf(item)
+        childNode.link.file = item
+    }
 }
 
-unlinkedDirs.each { dir ->
-    def childNode = unlinkedNode.createChild()
-    childNode.text = dir.name
-    childNode.link.file = dir
-}
+addCategory('page', unlinkedPages) { it.name.replaceAll(/\.md$/, '') }
+addCategory('directory', unlinkedDirs) { it.name }
+addCategory('asset', unlinkedAssets) { it.name }
