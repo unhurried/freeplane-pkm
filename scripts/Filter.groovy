@@ -2,13 +2,25 @@ import java.time.LocalDate
 
 def FILTER_HELP_MESSAGE = """\
 Command:
+  [a] show all
   [t] show todo list
   [d] due today or overdue
-  (empty) clear filter"""
+  (empty) hide archive"""
 
 def keyword = ui.showInputDialog(node.delegate, FILTER_HELP_MESSAGE, null)
 
+def isUnderArchive = { n ->
+    def current = n
+    while (current != null) {
+        if (current.text.equalsIgnoreCase('archive')) return true
+        current = current.getParent()
+    }
+    false
+}
+
 if (keyword == null || keyword.isEmpty()) {
+    node.map.filter() { !isUnderArchive(it) }
+} else if (keyword == 'a') {
     node.map.filter(true, true) { true }
 } else if (keyword == 't') {
     node.map.filter(true, true) {
