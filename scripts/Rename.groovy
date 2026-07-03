@@ -65,7 +65,7 @@ def renameDirectory(ui, node, docDir, directoryName, newName) {
 
 def INVALID_CHARS_PATTERN = '[\\\\/:*?"><|]'
 
-def newName = ui.showInputDialog(node.delegate, 'New Name', null)
+def newName = ui.showInputDialog(node.delegate, 'New Name', node.text)
 if (newName == null || newName.isEmpty()) {
     return
 }
