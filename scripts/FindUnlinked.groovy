@@ -2,6 +2,20 @@ def UNLINKED_NODE_NAME = 'unlinked'
 
 def docDir = Utils.loadDocDir(node)
 
+// Prepare the unlinked node before collecting linked files, so that links held by
+// the previous unlinked node's children are not counted as "linked".
+def rootNode = node.mindMap.root
+def unlinkedNode = rootNode.children.find { it.text == UNLINKED_NODE_NAME }
+if (!unlinkedNode) {
+    unlinkedNode = rootNode.createChild()
+    unlinkedNode.text = UNLINKED_NODE_NAME
+    unlinkedNode.left = false
+} else {
+    for (child in unlinkedNode.getChildren()) {
+        child.delete()
+    }
+}
+
 def linkedFiles = Utils.collectLinkedFiles(node.mindMap.root)
 
 def unlinkedPages = []
@@ -18,18 +32,6 @@ docDir.eachFile { file ->
         }
     } else if (file.isDirectory() && !linkedFiles.contains(file.canonicalFile)) {
         unlinkedDirs << file
-    }
-}
-
-def rootNode = node.mindMap.root
-def unlinkedNode = rootNode.children.find { it.text == UNLINKED_NODE_NAME }
-if (!unlinkedNode) {
-    unlinkedNode = rootNode.createChild()
-    unlinkedNode.text = UNLINKED_NODE_NAME
-    unlinkedNode.left = false
-} else {
-    for (child in unlinkedNode.getChildren()) {
-        child.delete()
     }
 }
 
