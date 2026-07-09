@@ -21,8 +21,7 @@ class UtilsSpec extends Specification {
         node.mindMap = props.mindMap
         node.getChildren = { -> node.children }
         node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
+            def child = createMockNode()
             node.children << child
             return child
         }
@@ -506,5 +505,167 @@ class UtilsSpec extends Specification {
         then:
         deleted.size() == 1
         deleted[0] == existingChild
+    }
+
+    // --- Tests for the sinceMillis gate on updateNextSteps ---
+
+    def "updateNextSteps skips re-reading when file is not modified after sinceMillis"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Task.md')
+        pageFile.text = """\
+### Next Steps
+
+* New step
+"""
+        pageFile.setLastModified(1000L)
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
+        def existingChild = new Expando()
+        existingChild.text = 'Old step'
+        def deleted = []
+        existingChild.delete = { -> deleted << existingChild }
+        def children = [existingChild]
+        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
+        node.children = children
+        node.getChildren = { -> new ArrayList(children) }
+        node.createChild = { ->
+            def child = new Expando()
+            child.text = ''
+            children << child
+            return child
+        }
+
+        when:
+        Utils.updateNextSteps(node, 2000L)
+
+        then:
+        deleted.isEmpty()
+        children.size() == 1
+        children[0].text == 'Old step'
+    }
+
+    def "updateNextSteps re-reads when file is modified after sinceMillis"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Task.md')
+        pageFile.text = """\
+### Next Steps
+
+* New step
+"""
+        pageFile.setLastModified(3000L)
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
+        def children = []
+        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
+        node.children = children
+        node.getChildren = { -> children }
+        node.createChild = { ->
+            def child = new Expando()
+            child.text = ''
+            children << child
+            return child
+        }
+
+        when:
+        Utils.updateNextSteps(node, 2000L)
+
+        then:
+        children.size() == 1
+        children[0].text == 'New step'
+    }
+
+    // --- Tests for loadNextStepsUpdatedAt / saveNextStepsUpdatedAt ---
+
+    def "loadNextStepsUpdatedAt returns stored timestamp"() {
+        given:
+        def valueNode = createMockNode(plainText: '123456789')
+        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
+        def configNode = createMockNode(text: 'config', children: [keyNode])
+        def rootNode = createMockNode(children: [configNode])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        expect:
+        Utils.loadNextStepsUpdatedAt(node) == 123456789L
+    }
+
+    def "loadNextStepsUpdatedAt returns 0 when timestamp node is missing"() {
+        given:
+        def configNode = createMockNode(text: 'config', children: [])
+        def rootNode = createMockNode(children: [configNode])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        expect:
+        Utils.loadNextStepsUpdatedAt(node) == 0L
+    }
+
+    def "loadNextStepsUpdatedAt returns 0 when stored value is not a number"() {
+        given:
+        def valueNode = createMockNode(plainText: 'not-a-number')
+        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
+        def configNode = createMockNode(text: 'config', children: [keyNode])
+        def rootNode = createMockNode(children: [configNode])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        expect:
+        Utils.loadNextStepsUpdatedAt(node) == 0L
+    }
+
+    def "saveNextStepsUpdatedAt creates the timestamp node when absent"() {
+        given:
+        def configNode = createMockNode(text: 'config', children: [])
+        def rootNode = createMockNode(children: [configNode])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        when:
+        Utils.saveNextStepsUpdatedAt(node, 987654321L)
+
+        then:
+        def keyNode = configNode.children.find { it.text == 'nextStepsUpdatedAt' }
+        keyNode != null
+        keyNode.children[0].text == '987654321'
+    }
+
+    def "saveNextStepsUpdatedAt updates the existing timestamp node"() {
+        given:
+        def valueNode = createMockNode(text: '111')
+        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
+        def configNode = createMockNode(text: 'config', children: [keyNode])
+        def rootNode = createMockNode(children: [configNode])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        when:
+        Utils.saveNextStepsUpdatedAt(node, 222L)
+
+        then:
+        configNode.children.size() == 1
+        keyNode.children.size() == 1
+        valueNode.text == '222'
+    }
+
+    def "saveNextStepsUpdatedAt throws when config node is missing"() {
+        given:
+        def rootNode = createMockNode(children: [])
+        def mindMap = new Expando()
+        mindMap.root = rootNode
+        def node = createMockNode(mindMap: mindMap)
+
+        when:
+        Utils.saveNextStepsUpdatedAt(node, 1L)
+
+        then:
+        def e = thrown(RuntimeException)
+        e.message == 'config node is missing.'
     }
 }

@@ -7,6 +7,7 @@ import groovy.transform.Field
 @Field private static final MAX_NEXT_STEPS = 3
 @Field private static final CONFIG_NODE_NAME = 'config'
 @Field private static final DOC_DIR_PATH_KEYS = ['docDirPath', 'pageDirPath']
+@Field private static final LAST_UPDATED_KEY = 'nextStepsUpdatedAt'
 
 /**
  * Loads the document directory path from the mind map's config node.
@@ -76,16 +77,62 @@ def static getPageFile(node) {
 /**
  * Reads the "### Next Steps" section from the page file and updates
  * the node's children with up to MAX_NEXT_STEPS items.
+ *
+ * When sinceMillis > 0, the page file is only re-read if it was modified
+ * after that time; otherwise the node's existing children are left untouched.
+ * This lets callers skip pages that have not changed since the last run.
  */
-def static updateNextSteps(node) {
+def static updateNextSteps(node, long sinceMillis = 0) {
     def pageFile = Utils.getPageFile(node)
     if (!pageFile) return
+
+    if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return
 
     pageFile.withReader { reader ->
         skipToNextStepsHeading(reader)
         clearChildren(node)
         addNextStepsAsChildren(reader, node)
     }
+}
+
+/**
+ * Reads the last time the Next Steps were refreshed from the map's config node.
+ * Config structure: root > config > nextStepsUpdatedAt > [epoch millis value]
+ * Returns 0 when the timestamp has never been recorded.
+ */
+def static loadNextStepsUpdatedAt(node) {
+    def configNode = findChildByText(node.mindMap.root, CONFIG_NODE_NAME)
+    if (!configNode) return 0L
+
+    def keyNode = findChildByText(configNode, LAST_UPDATED_KEY)
+    if (!keyNode) return 0L
+
+    def valueNode = keyNode.children[0]
+    if (!valueNode) return 0L
+
+    try {
+        return Long.parseLong(valueNode.plainText.trim())
+    } catch (NumberFormatException ignored) {
+        return 0L
+    }
+}
+
+/**
+ * Records the last time the Next Steps were refreshed under the map's config node,
+ * creating the config child nodes on demand.
+ */
+def static saveNextStepsUpdatedAt(node, long millis) {
+    def configNode = findChildByText(node.mindMap.root, CONFIG_NODE_NAME)
+    if (!configNode) throw new RuntimeException('config node is missing.')
+
+    def keyNode = findChildByText(configNode, LAST_UPDATED_KEY)
+    if (!keyNode) {
+        keyNode = configNode.createChild()
+        keyNode.text = LAST_UPDATED_KEY
+    }
+
+    def valueNode = keyNode.children[0] ?: keyNode.createChild()
+    valueNode.text = String.valueOf(millis)
 }
 
 /**
