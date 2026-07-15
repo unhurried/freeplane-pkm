@@ -47,6 +47,28 @@ def addonDescription = '''Freeplane PKM builds a personal knowledge management (
 * Mind Map Search and Filtering: Search and filter mind map nodes by conditions
 * Task Management: Reflect tasks written in Markdown files into the mind map'''
 
+def addonLicense = '''MIT License
+
+Copyright (c) 2026 unhurried
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.'''
+
 // Escapes a string for use in an XML attribute value. Newlines and tabs must be
 // written as character references ("&#xa;" etc.), otherwise the XML parser would
 // normalize them to spaces - this is how Freeplane itself serializes node text.
@@ -143,7 +165,9 @@ tasks.register('packageAddon') {
         line '</node>'
         line '</node>'
 
-        line '<node TEXT="license" FOLDED="true"/>'
+        line '<node TEXT="license" FOLDED="true">'
+        line "<node TEXT=\"${esc(addonLicense)}\"/>"
+        line '</node>'
         line '<node TEXT="preferences.xml" FOLDED="true"/>'
         line '<node TEXT="default.properties" FOLDED="true"/>'
 
