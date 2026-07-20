@@ -8,3 +8,8 @@ claude_home="${HOME}/.claude"
 install -d -m 0755 "${claude_home}"
 install -m 0644 "${template_dir}/claude/settings.json" "${claude_home}/settings.json"
 install -m 0644 "${template_dir}/.npmrc" "${HOME}/.npmrc"
+
+# Claude's sandbox only allows writes to paths that already exist (it bind-mounts
+# them); pre-create ~/.gradle so `gradle` can run inside the sandbox without a
+# manual mkdir or disabling the sandbox first.
+install -d -m 0755 "${HOME}/.gradle"

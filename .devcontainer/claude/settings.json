@@ -37,6 +37,11 @@
         "docs.python.org"
       ]
     },
+    "filesystem": {
+      "allowWrite": [
+        "~/.gradle"
+      ]
+    },
     "credentials": {
       "files": [
         { "path": "~/.ssh", "mode": "deny" },
