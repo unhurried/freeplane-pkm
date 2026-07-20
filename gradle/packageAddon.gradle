@@ -117,11 +117,11 @@ tasks.register('packageAddon') {
 
     inputs.dir file('scripts')
     inputs.dir file('lib')
-    inputs.property 'addonVersion', providers.gradleProperty('addonVersion').orElse(project.addonDefaultVersion)
+    inputs.property 'addonVersion', providers.gradleProperty('addonVersion').orElse(project.version.toString())
     outputs.dir layout.buildDirectory.dir('addon')
 
     doLast {
-        def version = (project.findProperty('addonVersion') ?: project.addonDefaultVersion).toString().trim()
+        def version = (project.findProperty('addonVersion') ?: project.version).toString().trim()
         if (!version.startsWith('v')) version = 'v' + version
 
         def scriptsDir = file('scripts')
