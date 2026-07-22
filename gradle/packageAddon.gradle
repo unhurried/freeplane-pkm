@@ -3,8 +3,12 @@
 // This task replicates what the Freeplane devtools add-on (checkAddOn.groovy +
 // releaseAddOn.groovy) does, without requiring a running Freeplane instance:
 //  - scripts/*.groovy are embedded as script nodes (source code in a child node)
-//  - lib/*.groovy are embedded base64-encoded under the "lib" node
-//    (installed to <userdir>/addons/<name>/lib, which is on the script classpath)
+//  - lib/*.groovy is compiled into a jar (via the standard Gradle `jar` task) and
+//    embedded base64-encoded under the "lib" node (installed to
+//    <userdir>/addons/<name>/lib, which is added to the add-on's script classpath).
+//    Per Freeplane's add-on docs, the lib node is for binary files (jars); a raw
+//    .groovy source file placed there is not compiled or added to the classpath,
+//    so classes it defines (e.g. Utils) would fail to resolve from addon scripts.
 //  - scripts/template.md, scripts/find.search-ms.template and scripts/init/init.groovy
 //    are packed into a zip under the "zips" node (extracted into <userdir>, so the
 //    scripts keep finding them at <userdir>/scripts/...)
@@ -115,8 +119,9 @@ tasks.register('packageAddon') {
     group = 'distribution'
     description = 'Packages the project as a Freeplane add-on (*.addon.mm).'
 
+    dependsOn tasks.named('jar')
     inputs.dir file('scripts')
-    inputs.dir file('lib')
+    inputs.file tasks.named('jar').flatMap { it.archiveFile }
     inputs.property 'addonVersion', providers.gradleProperty('addonVersion').orElse(project.version.toString())
     outputs.dir layout.buildDirectory.dir('addon')
 
@@ -125,7 +130,6 @@ tasks.register('packageAddon') {
         if (!version.startsWith('v')) version = 'v' + version
 
         def scriptsDir = file('scripts')
-        def libDir = file('lib')
 
         // Safety check: every top-level script must be declared in addonScriptDefs.
         def actualScripts = scriptsDir.listFiles().findAll { it.file && it.name.endsWith('.groovy') }*.name as Set
@@ -136,7 +140,9 @@ tasks.register('packageAddon') {
                 "  missing in scripts/: ${declaredScripts - actualScripts}")
         }
 
-        def libFiles = libDir.listFiles().findAll { it.file }.sort { it.name }
+        // lib/*.groovy is compiled into a jar (see build.gradle: sourceSets.main.groovy.srcDirs
+        // = ['lib']); the jar - not the raw sources - is what goes on the add-on's classpath.
+        def libFiles = [tasks.jar.archiveFile.get().asFile]
         def zipEntryFiles = addonZipEntries.collectEntries { path, projectPath ->
             def f = file(projectPath)
             if (!f.file) throw new GradleException("Missing file for zip entry: $projectPath")
