@@ -10,3 +10,6 @@ RUN apt-get update \
         sed \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Shorten the shell prompt to just the current directory name (was user@host:/full/path)
+RUN echo 'PS1="\[\033[01;34m\]\W\[\033[00m\] $ "' >> /home/codespace/.bashrc
