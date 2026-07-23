@@ -1,0 +1,254 @@
+// Packages the project as a Freeplane add-on (*.addon.mm).
+//
+// This task replicates what the Freeplane devtools add-on (checkAddOn.groovy +
+// releaseAddOn.groovy) does, without requiring a running Freeplane instance:
+//  - scripts/*.groovy are embedded as script nodes (source code in a child node)
+//  - lib/*.groovy is compiled into a jar (via the standard Gradle `jar` task) and
+//    embedded base64-encoded under the "lib" node (installed to
+//    <userdir>/addons/<name>/lib, which is added to the add-on's script classpath).
+//    Per Freeplane's add-on docs, the lib node is for binary files (jars); a raw
+//    .groovy source file placed there is not compiled or added to the classpath,
+//    so classes it defines (e.g. Utils) would fail to resolve from addon scripts.
+//  - scripts/template.md, scripts/find.search-ms.template and scripts/init/init.groovy
+//    are packed into a zip under the "zips" node (extracted into <userdir>, so the
+//    scripts keep finding them at <userdir>/scripts/...)
+
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+
+def addonName = 'freeplanePkm'
+def addonDisplayName = 'Freeplane PKM'
+def addonAuthor = 'unhurried'
+def addonHomepage = 'https://github.com/unhurried/freeplane-pkm'
+def addonFreeplaneVersionFrom = 'v1.11.1'
+
+// Menu order, titles, execution modes and keyboard shortcuts (from accelerator.properties).
+def addonScriptDefs = [
+    [file: 'NewMapView.groovy',              title: 'New Map View',               mode: 'on_single_node',   shortcut: 'F1',  exec: false],
+    [file: 'Edit.groovy',                    title: 'Edit',                       mode: 'on_single_node',   shortcut: 'F2',  exec: false],
+    [file: 'FoldOneLevel.groovy',            title: 'Fold One Level',             mode: 'on_single_node',   shortcut: 'F3',  exec: false],
+    [file: 'UnfoldOneLevel.groovy',          title: 'Unfold One Level',           mode: 'on_single_node',   shortcut: 'F4',  exec: false],
+    [file: 'NewPage.groovy',                 title: 'New Page',                   mode: 'on_selected_node', shortcut: 'F9',  exec: true],
+    [file: 'NewDirectory.groovy',            title: 'New Directory',              mode: 'on_selected_node', shortcut: 'F10', exec: true],
+    [file: 'Rename.groovy',                  title: 'Rename',                     mode: 'on_selected_node', shortcut: 'F11', exec: false],
+    [file: 'Delete.groovy',                  title: 'Delete',                     mode: 'on_selected_node', shortcut: 'F12', exec: false],
+    [file: 'AddAssets.groovy',               title: 'Add Assets',                 mode: 'on_single_node',   shortcut: '',    exec: false],
+    [file: 'AddToToDo.groovy',               title: 'Add to ToDo',                mode: 'on_selected_node', shortcut: 'F7',  exec: false],
+    [file: 'ShowToDo.groovy',                title: 'Show ToDo',                  mode: 'on_single_node',   shortcut: '',    exec: false],
+    [file: 'UpdateNextSteps.groovy',         title: 'Update Next Steps',          mode: 'on_selected_node', shortcut: 'F8',  exec: false],
+    [file: 'Filter.groovy',                  title: 'Filter',                     mode: 'on_selected_node', shortcut: 'F5',  exec: false],
+    [file: 'FindUnlinked.groovy',            title: 'Find Unlinked',              mode: 'on_single_node',   shortcut: '',    exec: false],
+    [file: 'SearchWithInazumaSearch.groovy', title: 'Search with InazumaSearch',  mode: 'on_selected_node', shortcut: 'F6',  exec: true],
+    [file: 'SearchWithWindowsSearch.groovy', title: 'Search with Windows Search', mode: 'on_single_node',   shortcut: '',    exec: true],
+]
+
+// Files extracted into the user directory on installation (zip entry path -> project file).
+def addonZipEntries = [
+    'scripts/template.md'            : 'scripts/template.md',
+    'scripts/find.search-ms.template': 'scripts/find.search-ms.template',
+    'scripts/init/init.groovy'       : 'scripts/init/init.groovy',
+]
+
+def addonDescription = '''Freeplane PKM builds a personal knowledge management (PKM) system on Freeplane.
+
+* Document Management: Manage links between mind map nodes and Markdown files/directories
+* Mind Map Search and Filtering: Search and filter mind map nodes by conditions
+* Task Management: Reflect tasks written in Markdown files into the mind map'''
+
+def addonLicense = '''MIT License
+
+Copyright (c) 2026 unhurried
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.'''
+
+// Escapes a string for use in an XML attribute value. Newlines and tabs must be
+// written as character references ("&#xa;" etc.), otherwise the XML parser would
+// normalize them to spaces - this is how Freeplane itself serializes node text.
+static String escapeXmlAttr(String s) {
+    s.replace('&', '&amp;')
+     .replace('<', '&lt;')
+     .replace('>', '&gt;')
+     .replace('"', '&quot;')
+     .replace('\r\n', '\n')
+     .replace('\r', '\n')
+     .replace('\n', '&#xa;')
+     .replace('\t', '&#x9;')
+}
+
+static String base64Mime(byte[] bytes) {
+    Base64.getMimeEncoder(76, '\n'.getBytes('US-ASCII')).encodeToString(bytes)
+}
+
+static byte[] zipBytes(Map<String, File> entries) {
+    def baos = new ByteArrayOutputStream()
+    new ZipOutputStream(baos).withCloseable { zos ->
+        def dirs = new TreeSet<String>()
+        entries.keySet().each { path ->
+            def dir = ''
+            path.tokenize('/').init().each { seg -> dir += seg + '/'; dirs << dir }
+        }
+        dirs.each { zos.putNextEntry(new ZipEntry(it)); zos.closeEntry() }
+        entries.each { path, file ->
+            def entry = new ZipEntry(path)
+            entry.time = file.lastModified()
+            zos.putNextEntry(entry)
+            zos << file.bytes
+            zos.closeEntry()
+        }
+    }
+    baos.toByteArray()
+}
+
+tasks.register('packageAddon') {
+    group = 'distribution'
+    description = 'Packages the project as a Freeplane add-on (*.addon.mm).'
+
+    dependsOn tasks.named('jar')
+    inputs.dir file('scripts')
+    inputs.file tasks.named('jar').flatMap { it.archiveFile }
+    inputs.property 'addonVersion', providers.gradleProperty('addonVersion').orElse(project.version.toString())
+    outputs.dir layout.buildDirectory.dir('addon')
+
+    doLast {
+        def version = (project.findProperty('addonVersion') ?: project.version).toString().trim()
+        if (!version.startsWith('v')) version = 'v' + version
+
+        def scriptsDir = file('scripts')
+
+        // Safety check: every top-level script must be declared in addonScriptDefs.
+        def actualScripts = scriptsDir.listFiles().findAll { it.file && it.name.endsWith('.groovy') }*.name as Set
+        def declaredScripts = addonScriptDefs*.file as Set
+        if (actualScripts != declaredScripts) {
+            throw new GradleException("Scripts in scripts/ and addonScriptDefs are out of sync.\n" +
+                "  missing in defs: ${actualScripts - declaredScripts}\n" +
+                "  missing in scripts/: ${declaredScripts - actualScripts}")
+        }
+
+        // lib/*.groovy is compiled into a jar (see build.gradle: sourceSets.main.groovy.srcDirs
+        // = ['lib']); the jar - not the raw sources - is what goes on the add-on's classpath.
+        def libFiles = [tasks.jar.archiveFile.get().asFile]
+        def zipEntryFiles = addonZipEntries.collectEntries { path, projectPath ->
+            def f = file(projectPath)
+            if (!f.file) throw new GradleException("Missing file for zip entry: $projectPath")
+            [(path): f]
+        }
+
+        def esc = { s -> escapeXmlAttr(s?.toString() ?: '') }
+        def xml = new StringBuilder()
+        def line = { s -> xml.append(s).append('\n') }
+
+        line '<map version="freeplane 1.11.1">'
+        line '<!--To view this file, download free mind mapping software Freeplane from https://www.freeplane.org -->'
+        line "<node TEXT=\"${esc(addonDisplayName)}\" FOLDED=\"false\" LINK=\"${esc(addonHomepage)}\">"
+        line "<attribute NAME=\"name\" VALUE=\"${esc(addonName)}\"/>"
+        line "<attribute NAME=\"version\" VALUE=\"${esc(version)}\"/>"
+        line "<attribute NAME=\"author\" VALUE=\"${esc(addonAuthor)}\"/>"
+        line "<attribute NAME=\"freeplaneVersionFrom\" VALUE=\"${esc(addonFreeplaneVersionFrom)}\"/>"
+        line '<attribute NAME="freeplaneVersionTo" VALUE=""/>'
+        line '<attribute NAME="updateUrl" VALUE=""/>'
+        def downloadUrl = "${addonHomepage}/releases/download/${version}/freeplane-pkm-${version}.addon.mm"
+        line "<attribute NAME=\"downloadUrl\" VALUE=\"${esc(downloadUrl)}\"/>"
+
+        line '<node TEXT="description" FOLDED="true">'
+        line "<node TEXT=\"${esc(addonDescription)}\"/>"
+        line '</node>'
+
+        line '<node TEXT="changes" FOLDED="true">'
+        line "<node TEXT=\"${esc(version)}\">"
+        line '<node TEXT="See the project homepage for the change history."/>'
+        line '</node>'
+        line '</node>'
+
+        line '<node TEXT="license" FOLDED="true">'
+        line "<node TEXT=\"${esc(addonLicense)}\"/>"
+        line '</node>'
+        line '<node TEXT="preferences.xml" FOLDED="true"/>'
+        line '<node TEXT="default.properties" FOLDED="true"/>'
+
+        line '<node TEXT="translations" FOLDED="true">'
+        line '<node TEXT="en">'
+        line "<attribute NAME=\"addons.\${name}\" VALUE=\"${esc(addonDisplayName)}\"/>"
+        addonScriptDefs.each { def scriptBase = it.file - '.groovy'
+            line "<attribute NAME=\"addons.\${name}.${esc(scriptBase)}\" VALUE=\"${esc(it.title)}\"/>"
+        }
+        line '</node>'
+        line '</node>'
+
+        line '<node TEXT="deinstall" FOLDED="true">'
+        line '<attribute NAME="delete" VALUE="${installationbase}/addons/${name}.script.xml"/>'
+        addonScriptDefs.each {
+            line "<attribute NAME=\"delete\" VALUE=\"\${installationbase}/addons/\${name}/scripts/${esc(it.file)}\"/>"
+        }
+        libFiles.each {
+            line "<attribute NAME=\"delete\" VALUE=\"\${installationbase}/addons/\${name}/lib/${esc(it.name)}\"/>"
+        }
+        addonZipEntries.keySet().each {
+            line "<attribute NAME=\"delete\" VALUE=\"\${installationbase}/${esc(it)}\"/>"
+        }
+        line '</node>'
+
+        line '<node TEXT="scripts" FOLDED="true">'
+        addonScriptDefs.each { def d ->
+            def scriptBase = d.file - '.groovy'
+            line "<node TEXT=\"${esc(d.file)}\" FOLDED=\"true\">"
+            line "<attribute NAME=\"menuTitleKey\" VALUE=\"addons.\${name}.${esc(scriptBase)}\"/>"
+            line "<attribute NAME=\"menuLocation\" VALUE=\"main_menu_scripting/${esc(addonName)}\"/>"
+            line "<attribute NAME=\"executionMode\" VALUE=\"${esc(d.mode)}\"/>"
+            line "<attribute NAME=\"keyboardShortcut\" VALUE=\"${esc(d.shortcut)}\"/>"
+            line '<attribute NAME="execute_scripts_without_asking" VALUE="true"/>'
+            line '<attribute NAME="execute_scripts_without_file_restriction" VALUE="true"/>'
+            line '<attribute NAME="execute_scripts_without_write_restriction" VALUE="true"/>'
+            line "<attribute NAME=\"execute_scripts_without_exec_restriction\" VALUE=\"${d.exec}\"/>"
+            line '<attribute NAME="execute_scripts_without_network_restriction" VALUE="false"/>'
+            line "<node TEXT=\"${esc(new File(scriptsDir, d.file).getText('UTF-8'))}\"/>"
+            line '</node>'
+        }
+        line '</node>'
+
+        line '<node TEXT="zips" FOLDED="true">'
+        line '<node TEXT="scripts" FOLDED="true">'
+        line "<node TEXT=\"${esc(base64Mime(zipBytes(zipEntryFiles)))}\"/>"
+        line '</node>'
+        line '</node>'
+
+        line '<node TEXT="lib" FOLDED="true">'
+        libFiles.each {
+            line "<node TEXT=\"${esc(it.name)}\" FOLDED=\"true\">"
+            line "<node TEXT=\"${esc(base64Mime(it.bytes))}\"/>"
+            line '</node>'
+        }
+        line '</node>'
+
+        line '<node TEXT="images" FOLDED="true"/>'
+        line '</node>'
+        line '</map>'
+
+        def outDir = layout.buildDirectory.dir('addon').get().asFile
+        outDir.deleteDir()
+        outDir.mkdirs()
+        def addonFile = new File(outDir, "freeplane-pkm-${version}.addon.mm")
+        addonFile.setText(xml.toString(), 'UTF-8')
+
+        new File(outDir, 'version.properties').text = """version=${version}
+downloadUrl=${downloadUrl}
+freeplaneVersionFrom=${addonFreeplaneVersionFrom}
+"""
+        logger.lifecycle("Created ${addonFile}")
+    }
+}

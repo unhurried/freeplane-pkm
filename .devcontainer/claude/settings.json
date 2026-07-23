@@ -1,0 +1,52 @@
+{
+  "autoUpdates": true,
+  "permissions": {
+    "allow": [
+      "Write",
+      "Edit",
+      "Bash(git:*)",
+      "Bash(gradle:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(sed:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(touch:*)",
+      "Bash(chmod:*)",
+      "Bash(diff:*)",
+      "Bash(which:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:docs.python.org)"
+    ],
+    "deny": [],
+    "ask": [
+      "Bash(git push:*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "docs.github.com",
+        "docs.python.org"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": [
+        "~/.gradle"
+      ]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws/credentials", "mode": "deny" }
+      ]
+    }
+  }
+}

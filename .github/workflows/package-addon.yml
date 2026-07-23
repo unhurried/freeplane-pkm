@@ -1,0 +1,55 @@
+name: Package Add-on
+
+on:
+  push:
+    branches: [master, feature/package-addon]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Run tests
+        run: gradle test
+
+      - name: Package add-on
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            gradle packageAddon -PaddonVersion="$GITHUB_REF_NAME"
+          else
+            gradle packageAddon
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freeplane-pkm-addon
+          path: |
+            build/addon/*.addon.mm
+            build/addon/version.properties
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            build/addon/*.addon.mm \
+            build/addon/version.properties \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

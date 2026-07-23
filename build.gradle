@@ -2,6 +2,8 @@ plugins {
     id 'groovy'
 }
 
+apply from: 'gradle/packageAddon.gradle'
+
 repositories {
     mavenCentral()
 }
