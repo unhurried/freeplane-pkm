@@ -14,15 +14,24 @@
 		},
 		"ghcr.io/devcontainers/features/copilot-cli:1": {
 			"version": "latest"
-		},
-		"ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+		}
+		// Claude Code is installed natively in postCreateCommand (see scripts/post-create.sh)
+		// instead of via this feature, because installing through the feature disables
+		// Claude Code's built-in auto-update mechanism.
+		// "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
 	},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
-	// Installs the shared Claude Code settings and a hardened .npmrc into the container user's home.
-	"postCreateCommand": "bash .devcontainer/scripts/post-create.sh ${containerWorkspaceFolder}"
-	// Configure tool-specific properties.
-	// "customizations": {},
+	// Installs Claude Code natively, the shared settings, and a hardened .npmrc into the container user's home.
+	"postCreateCommand": "bash .devcontainer/scripts/post-create.sh ${containerWorkspaceFolder}",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"terminal.integrated.defaultProfile.linux": "bash",
+				"security.workspace.trust.enabled": false
+			}
+		}
+	}
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }
