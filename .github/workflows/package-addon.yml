@@ -2,7 +2,7 @@ name: Package Add-on
 
 on:
   push:
-    branches: [master, feature/package-addon]
+    branches: [master, feature/*]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
