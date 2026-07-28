@@ -1,4 +1,5 @@
 import groovy.transform.Field
+import javax.swing.SwingUtilities
 
 @Field static final DOC_TARGET_PAGE = 'page'
 @Field static final DOC_TARGET_DIRECTORY = 'directory'
@@ -82,9 +83,10 @@ def static getPageFile(node) {
  * after that time; otherwise the node's existing children are left untouched.
  * This lets callers skip pages that have not changed since the last run.
  *
- * The file read and the resulting node update run on a background thread, so
- * callers (e.g. a loop over every node in the map) don't block the UI thread
- * on disk I/O.
+ * The file read happens on a background thread so callers (e.g. a loop over
+ * every node in the map) don't block the UI thread on disk I/O. The node
+ * update is then applied on the UI thread, since Freeplane's node model
+ * (e.g. child creation/deletion) is only safe to mutate from there.
  */
 def static updateNextSteps(node, long sinceMillis = 0) {
     def pageFile = Utils.getPageFile(node)
@@ -98,7 +100,9 @@ def static updateNextSteps(node, long sinceMillis = 0) {
             skipToNextStepsHeading(reader)
             nextStepLines = readNextStepLines(reader)
         }
-        applyNextSteps(node, nextStepLines)
+        SwingUtilities.invokeLater {
+            applyNextSteps(node, nextStepLines)
+        }
     }
 }
 

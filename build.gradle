@@ -33,4 +33,7 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    // updateNextSteps() marshals node updates onto the Swing EDT; running headless
+    // lets that AWT event queue start on machines/CI runners without a display.
+    systemProperty 'java.awt.headless', 'true'
 }
