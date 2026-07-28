@@ -30,7 +30,6 @@ def addonScriptDefs = [
     [file: 'UnfoldOneLevel.groovy',          title: 'Unfold One Level',           mode: 'on_single_node',   shortcut: 'F4',  exec: false],
     [file: 'NewPage.groovy',                 title: 'New Page',                   mode: 'on_selected_node', shortcut: 'F9',  exec: true],
     [file: 'NewDirectory.groovy',            title: 'New Directory',              mode: 'on_selected_node', shortcut: 'F10', exec: true],
-    [file: 'Rename.groovy',                  title: 'Rename',                     mode: 'on_selected_node', shortcut: 'F11', exec: false],
     [file: 'Delete.groovy',                  title: 'Delete',                     mode: 'on_selected_node', shortcut: 'F12', exec: false],
     [file: 'AddAssets.groovy',               title: 'Add Assets',                 mode: 'on_single_node',   shortcut: '',    exec: false],
     [file: 'AddToToDo.groovy',               title: 'Add to ToDo',                mode: 'on_selected_node', shortcut: 'F7',  exec: false],

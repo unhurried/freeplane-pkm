@@ -1,5 +1,6 @@
 import spock.lang.Specification
 import spock.lang.TempDir
+import spock.util.concurrent.PollingConditions
 
 import java.nio.file.Path
 
@@ -308,10 +309,12 @@ class UtilsSpec extends Specification {
         Utils.updateNextSteps(node)
 
         then:
-        children.size() == 3
-        children[0].text == 'First step'
-        children[1].text == 'Second step'
-        children[2].text == 'Third step'
+        new PollingConditions(timeout: 2).eventually {
+            children.size() == 3
+            children[0].text == 'First step'
+            children[1].text == 'Second step'
+            children[2].text == 'Third step'
+        }
     }
 
     def "updateNextSteps handles dash list items"() {
@@ -341,9 +344,11 @@ class UtilsSpec extends Specification {
         Utils.updateNextSteps(node)
 
         then:
-        children.size() == 2
-        children[0].text == 'Step A'
-        children[1].text == 'Step B'
+        new PollingConditions(timeout: 2).eventually {
+            children.size() == 2
+            children[0].text == 'Step A'
+            children[1].text == 'Step B'
+        }
     }
 
     def "updateNextSteps stops at next heading"() {
@@ -376,8 +381,10 @@ class UtilsSpec extends Specification {
         Utils.updateNextSteps(node)
 
         then:
-        children.size() == 1
-        children[0].text == 'Only step'
+        new PollingConditions(timeout: 2).eventually {
+            children.size() == 1
+            children[0].text == 'Only step'
+        }
     }
 
     def "updateNextSteps does nothing when no page file linked"() {
@@ -503,8 +510,10 @@ class UtilsSpec extends Specification {
         Utils.updateNextSteps(node)
 
         then:
-        deleted.size() == 1
-        deleted[0] == existingChild
+        new PollingConditions(timeout: 2).eventually {
+            deleted.size() == 1
+            deleted[0] == existingChild
+        }
     }
 
     // --- Tests for the sinceMillis gate on updateNextSteps ---
@@ -572,8 +581,10 @@ class UtilsSpec extends Specification {
         Utils.updateNextSteps(node, 2000L)
 
         then:
-        children.size() == 1
-        children[0].text == 'New step'
+        new PollingConditions(timeout: 2).eventually {
+            children.size() == 1
+            children[0].text == 'New step'
+        }
     }
 
     // --- Tests for loadNextStepsUpdatedAt / saveNextStepsUpdatedAt ---

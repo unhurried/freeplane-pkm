@@ -1,4 +1,5 @@
 import groovy.transform.Field
+import javax.swing.SwingUtilities
 
 @Field static final DOC_TARGET_PAGE = 'page'
 @Field static final DOC_TARGET_DIRECTORY = 'directory'
@@ -81,6 +82,11 @@ def static getPageFile(node) {
  * When sinceMillis > 0, the page file is only re-read if it was modified
  * after that time; otherwise the node's existing children are left untouched.
  * This lets callers skip pages that have not changed since the last run.
+ *
+ * The file read happens on a background thread so callers (e.g. a loop over
+ * every node in the map) don't block the UI thread on disk I/O. The node
+ * update is then applied on the UI thread, since Freeplane's node model
+ * (e.g. child creation/deletion) is only safe to mutate from there.
  */
 def static updateNextSteps(node, long sinceMillis = 0) {
     def pageFile = Utils.getPageFile(node)
@@ -88,10 +94,15 @@ def static updateNextSteps(node, long sinceMillis = 0) {
 
     if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return
 
-    pageFile.withReader { reader ->
-        skipToNextStepsHeading(reader)
-        clearChildren(node)
-        addNextStepsAsChildren(reader, node)
+    Thread.start {
+        def nextStepLines
+        pageFile.withReader { reader ->
+            skipToNextStepsHeading(reader)
+            nextStepLines = readNextStepLines(reader)
+        }
+        SwingUtilities.invokeLater {
+            applyNextSteps(node, nextStepLines)
+        }
     }
 }
 
@@ -191,18 +202,25 @@ private static void clearChildren(node) {
     }
 }
 
-private static void addNextStepsAsChildren(Reader reader, node) {
-    int count = 0
+private static List<String> readNextStepLines(Reader reader) {
+    def lines = []
     while (true) {
         String line = reader.readLine()
         if (line == null || line.startsWith('#')) break
 
         if (isListItem(line)) {
-            def newNode = node.createChild()
-            newNode.text = line.substring(2)
-            count++
-            if (count == MAX_NEXT_STEPS) break
+            lines << line.substring(2)
+            if (lines.size() == MAX_NEXT_STEPS) break
         }
+    }
+    return lines
+}
+
+private static void applyNextSteps(node, List<String> lines) {
+    clearChildren(node)
+    for (line in lines) {
+        def newNode = node.createChild()
+        newNode.text = line
     }
 }
 
