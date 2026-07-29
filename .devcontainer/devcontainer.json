@@ -9,7 +9,12 @@
 	"features": {
 		"ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {
 			"version": "latest",
-			"jdkVersion": "latest",
+			// Pinned to match the Java version used by the Package Add-on CI workflow
+			// (.github/workflows/package-addon.yml) and supported by Freeplane's bundled
+			// JRE. "latest" previously installed JDK 25, which compiles to class file
+			// version 69 -- newer than Freeplane's runtime can load (max 65, Java 21),
+			// causing UnsupportedClassVersionError when running a locally built add-on.
+			"jdkVersion": "17",
 			"jdkDistro": "ms"
 		},
 		"ghcr.io/devcontainers/features/copilot-cli:1": {

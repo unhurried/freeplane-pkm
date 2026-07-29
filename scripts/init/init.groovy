@@ -15,9 +15,12 @@ map.addListener({
 
     updating = true
     try {
+        def sinceMillis = Utils.loadNextStepsUpdatedAt(map.root)
+        def startedAt = System.currentTimeMillis()
         c.findAll().each {
-            Utils.updateNextSteps(it)
+            Utils.updateNextSteps(it, sinceMillis)
         }
+        Utils.saveNextStepsUpdatedAt(map.root, startedAt)
         lastUpdated = LocalDateTime.now()
     } finally {
         updating = false

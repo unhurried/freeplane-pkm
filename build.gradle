@@ -8,6 +8,14 @@ repositories {
     mavenCentral()
 }
 
+// Pinned so the compiled class file version stays loadable by Freeplane's bundled
+// JRE regardless of which JDK happens to run Gradle (e.g. a devcontainer update).
+// Must stay in sync with the java-version used in .github/workflows/package-addon.yml.
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
 sourceSets {
     main {
         groovy {
@@ -36,4 +44,10 @@ test {
     // updateNextSteps() marshals node updates onto the Swing EDT; running headless
     // lets that AWT event queue start on machines/CI runners without a display.
     systemProperty 'java.awt.headless', 'true'
+    // The JVM hardcodes java.io.tmpdir to /tmp and ignores $TMPDIR, so @TempDir-based
+    // tests fail wherever /tmp itself isn't writable (e.g. Claude Code's sandboxed
+    // shell, which only allows writes under $TMPDIR). Forward it through when set.
+    if (System.getenv('TMPDIR')) {
+        systemProperty 'java.io.tmpdir', System.getenv('TMPDIR')
+    }
 }
