@@ -1,21 +1,15 @@
 // If the node links to a PKM page or directory, rename it on disk (and update the
 // mind map node/link accordingly) instead of editing its text directly, since a
 // plain text edit would desynchronize the node from the file system.
-// Otherwise, delegate to the built-in MindMap/EditAction (default shortcut F2).
-// The built-in action cannot be shipped with an add-on shortcut, so this script
-// delegates to it, keeping the behavior identical.
+// Otherwise, edit the node text through an input dialog, the same way a page or
+// directory name is edited, instead of the built-in in-place editor.
 
-import org.freeplane.features.mode.Controller
-import java.awt.event.ActionEvent
-
-def editWithBuiltinAction(ui, node) {
-    def key = 'EditAction'
-    def action = Controller.currentModeController.getAction(key)
-    if (action == null) {
-        ui.errorMessage("Action not found: $key")
+def editText(ui, node) {
+    def newText = ui.showInputDialog(node.delegate, 'New Text', node.text)
+    if (newText == null || newText.isEmpty()) {
         return
     }
-    action.actionPerformed(new ActionEvent(node.delegate, ActionEvent.ACTION_PERFORMED, key))
+    node.text = newText
 }
 
 def renamePage(ui, node, docDir, pageName, newName) {
@@ -85,7 +79,7 @@ def renameDirectory(ui, node, docDir, directoryName, newName) {
 
 def docNodeType = Utils.getDocNodeType(node)
 if (docNodeType == null) {
-    editWithBuiltinAction(ui, node)
+    editText(ui, node)
     return
 }
 
