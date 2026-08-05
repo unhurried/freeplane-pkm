@@ -587,6 +587,76 @@ class UtilsSpec extends Specification {
         }
     }
 
+    // --- Tests for updateAllNextSteps ---
+
+    def "updateAllNextSteps updates every page node of the map and records the run time"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def taskFile = new File(docDir, 'Task.md')
+        taskFile.text = """\
+### Next Steps
+
+* First step
+"""
+        def otherFile = new File(docDir, 'Other.md')
+        otherFile.text = """\
+### Next Steps
+
+* Other step
+"""
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
+        def configNode = mindMap.root.children[0]
+        def taskNode = createMockNode(text: 'Task', linkFile: taskFile, mindMap: mindMap)
+        def otherNode = createMockNode(text: 'Other', linkFile: otherFile, mindMap: mindMap)
+        // The second page node is nested, so the whole tree has to be traversed.
+        taskNode.children << otherNode
+        mindMap.root.children << taskNode
+        mindMap.root.mindMap = mindMap
+
+        when:
+        Utils.updateAllNextSteps(mindMap.root)
+
+        then:
+        new PollingConditions(timeout: 2).eventually {
+            taskNode.children.any { it.text == 'First step' }
+            otherNode.children.any { it.text == 'Other step' }
+        }
+        configNode.children.find { it.text == 'nextStepsUpdatedAt' } != null
+    }
+
+    def "updateAllNextSteps skips pages that were not modified since the last run"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Task.md')
+        pageFile.text = """\
+### Next Steps
+
+* New step
+"""
+        pageFile.setLastModified(1000L)
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
+        def configNode = mindMap.root.children[0]
+        configNode.children << createMockNode(text: 'nextStepsUpdatedAt',
+                children: [createMockNode(plainText: '2000')])
+        def deleted = []
+        def existingChild = createMockNode(text: 'Old step')
+        existingChild.delete = { -> deleted << existingChild }
+        def taskNode = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap,
+                children: [existingChild])
+        mindMap.root.children << taskNode
+        mindMap.root.mindMap = mindMap
+
+        when:
+        Utils.updateAllNextSteps(mindMap.root)
+
+        then:
+        deleted.isEmpty()
+        taskNode.children.size() == 1
+        taskNode.children[0].text == 'Old step'
+    }
+
     // --- Tests for loadNextStepsUpdatedAt / saveNextStepsUpdatedAt ---
 
     def "loadNextStepsUpdatedAt returns stored timestamp"() {
