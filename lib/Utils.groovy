@@ -107,6 +107,25 @@ def static updateNextSteps(node, long sinceMillis = 0) {
 }
 
 /**
+ * Refreshes the Next Steps of every node of the node's map and records the
+ * run time under the config node, so the next run can skip pages whose
+ * Markdown file has not been modified since.
+ */
+def static updateAllNextSteps(node) {
+    def root = node.mindMap.root
+    def sinceMillis = loadNextStepsUpdatedAt(root)
+    def startedAt = System.currentTimeMillis()
+
+    // The nodes are collected up front because updateNextSteps() replaces the
+    // children of the nodes it updates while the traversal is still running.
+    for (target in collectNodes(root)) {
+        updateNextSteps(target, sinceMillis)
+    }
+
+    saveNextStepsUpdatedAt(root, startedAt)
+}
+
+/**
  * Reads the last time the Next Steps were refreshed from the map's config node.
  * Config structure: root > config > nextStepsUpdatedAt > [epoch millis value]
  * Returns 0 when the timestamp has never been recorded.
@@ -157,6 +176,19 @@ def static collectLinkedFiles(node) {
 }
 
 // --- Private helper methods ---
+
+private static List collectNodes(node) {
+    def nodes = []
+    collectNodesRecursive(node, nodes)
+    return nodes
+}
+
+private static void collectNodesRecursive(node, List nodes) {
+    nodes.add(node)
+    for (child in node.children) {
+        collectNodesRecursive(child, nodes)
+    }
+}
 
 private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
     def linkedFile = getLinkedFile(node)
