@@ -26,24 +26,24 @@ def UPDATE_PERMISSIONS = new ScriptingPermissions([
     (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_READ_RESTRICTION): true,
 ])
 
-def updating = false
 def lastUpdated = LocalDateTime.now()
 
 map.addListener({
     def updateAfter = lastUpdated.plusMinutes(UPDATE_FREQUENCY_MIN)
     if (LocalDateTime.now().isBefore(updateAfter)) return
-    if (updating) return
 
-    updating = true
     // Recorded before the run so that a failing update is retried on the next
     // interval instead of on every single node change.
     lastUpdated = LocalDateTime.now()
     try {
+        // Utils.updateAllNextSteps() scans the map and reads changed pages on
+        // a background thread and returns immediately, so this call does not
+        // block the event thread. It also guards itself against overlapping
+        // scans, so firing this again before a previous (slow) scan has
+        // finished is safe and simply a no-op.
         ScriptingEngine.executeScript(map.root.delegate, UPDATE_SCRIPT, UPDATE_PERMISSIONS)
     } catch (Exception e) {
         // Never let this escape into the AWT event thread.
         LogUtils.warn('failed to update next steps', e)
-    } finally {
-        updating = false
     }
 })

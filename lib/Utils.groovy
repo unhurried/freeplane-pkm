@@ -1,4 +1,5 @@
 import groovy.transform.Field
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
 @Field static final DOC_TARGET_PAGE = 'page'
@@ -9,6 +10,12 @@ import javax.swing.SwingUtilities
 @Field private static final CONFIG_NODE_NAME = 'config'
 @Field private static final DOC_DIR_PATH_KEYS = ['docDirPath', 'pageDirPath']
 @Field private static final LAST_UPDATED_KEY = 'nextStepsUpdatedAt'
+
+// Guards updateAllNextSteps() against overlapping scans (e.g. the periodic
+// listener firing again before a previous scan of a large map has finished).
+// Held from the start of the background scan until its results have been
+// applied on the EDT.
+@Field private static final AtomicBoolean NEXT_STEPS_SCAN_IN_PROGRESS = new AtomicBoolean(false)
 
 /**
  * Loads the document directory path from the mind map's config node.
@@ -95,11 +102,7 @@ def static updateNextSteps(node, long sinceMillis = 0) {
     if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return
 
     Thread.start {
-        def nextStepLines
-        pageFile.withReader { reader ->
-            skipToNextStepsHeading(reader)
-            nextStepLines = readNextStepLines(reader)
-        }
+        def nextStepLines = readNextStepLinesFromFile(pageFile)
         SwingUtilities.invokeLater {
             applyNextSteps(node, nextStepLines)
         }
@@ -110,19 +113,59 @@ def static updateNextSteps(node, long sinceMillis = 0) {
  * Refreshes the Next Steps of every node of the node's map and records the
  * run time under the config node, so the next run can skip pages whose
  * Markdown file has not been modified since.
+ *
+ * Deciding which pages changed (stat'ing every linked file) and reading their
+ * content both happen on a single background thread, so a map with many
+ * nodes doesn't perform per-node file I/O synchronously on the UI thread.
+ * Node mutations - updating children and recording the run time - are
+ * collected while scanning and applied afterwards in one batch on the Swing
+ * EDT, since the node model is only safe to mutate there; batching also means
+ * a single map refresh covers the whole run instead of one per changed page.
+ *
+ * Overlapping runs collapse into a no-op: if a scan triggered earlier (e.g.
+ * by the periodic listener) hasn't finished yet, this call returns
+ * immediately instead of starting a second concurrent scan.
  */
 def static updateAllNextSteps(node) {
     def root = node.mindMap.root
+
+    // A single, cheap directory check - resolved eagerly and synchronously so
+    // a missing/misconfigured docDir still fails fast and visibly to callers
+    // such as the manual "Update Next Steps" command. Resolving it once here
+    // (instead of per node, as getPageFile()/loadDocDir() would) also avoids
+    // re-walking the config node and re-stat'ing docDir for every node below.
+    def docDir = Utils.loadDocDir(root)
+
+    if (!NEXT_STEPS_SCAN_IN_PROGRESS.compareAndSet(false, true)) return
+
     def sinceMillis = loadNextStepsUpdatedAt(root)
     def startedAt = System.currentTimeMillis()
+    // Collected up front (cheap, no file I/O) since it just walks the node
+    // tree; the actual per-node file checks happen on the background thread.
+    def targets = collectNodes(root)
 
-    // The nodes are collected up front because updateNextSteps() replaces the
-    // children of the nodes it updates while the traversal is still running.
-    for (target in collectNodes(root)) {
-        updateNextSteps(target, sinceMillis)
+    Thread.start {
+        def updates
+        try {
+            updates = [:]
+            for (target in targets) {
+                def lines = readChangedNextSteps(target, docDir, sinceMillis)
+                if (lines != null) updates[target] = lines
+            }
+        } catch (Exception e) {
+            NEXT_STEPS_SCAN_IN_PROGRESS.set(false)
+            return
+        }
+
+        SwingUtilities.invokeLater {
+            try {
+                updates.each { target, lines -> applyNextSteps(target, lines) }
+                saveNextStepsUpdatedAt(root, startedAt)
+            } finally {
+                NEXT_STEPS_SCAN_IN_PROGRESS.set(false)
+            }
+        }
     }
-
-    saveNextStepsUpdatedAt(root, startedAt)
 }
 
 /**
@@ -225,6 +268,38 @@ private static void skipToNextStepsHeading(Reader reader) {
     while (true) {
         String line = reader.readLine()
         if (line == null || line == NEXT_STEPS_HEADING) break
+    }
+}
+
+private static List<String> readNextStepLinesFromFile(File pageFile) {
+    def lines
+    pageFile.withReader { reader ->
+        skipToNextStepsHeading(reader)
+        lines = readNextStepLines(reader)
+    }
+    return lines
+}
+
+/**
+ * Batch-scan variant of getPageFile() + updateNextSteps()'s gate: takes the
+ * already-resolved docDir instead of re-deriving it per node, and returns
+ * null - rather than throwing - for a node that isn't a valid, unchanged, or
+ * readable page, so one broken link doesn't interrupt scanning the rest of
+ * the map.
+ */
+private static List<String> readChangedNextSteps(node, File docDir, long sinceMillis) {
+    try {
+        def linkedFile = getLinkedFile(node)
+        if (!linkedFile) return null
+
+        def pageFile = new File(docDir, node.text + '.md')
+        if (linkedFile != pageFile || !pageFile.exists()) return null
+
+        if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return null
+
+        return readNextStepLinesFromFile(pageFile)
+    } catch (Exception ignored) {
+        return null
     }
 }
 
