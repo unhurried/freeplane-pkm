@@ -21,8 +21,8 @@ Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync w
 ## Structure
 
 - `scripts/*.groovy` — one script per menu entry. Written as top-level statements (not classes), relying on the bindings Freeplane injects: `node`, `c`, `ui`.
-- `lib/Utils.groovy` — shared logic and the only tested code (`scripts/` has no tests). It is compiled into a jar that goes on the add-on's classpath; raw `.groovy` sources placed under the add-on's `lib` node are not compiled and would fail to resolve.
-- `test/UtilsSpec.groovy` — Spock. Freeplane's node API is mocked with `Expando`.
+- `lib/Utils.groovy` — shared node/doc-directory logic. `lib/SearchIndex.groovy` (+ `lib/SearchHit.groovy`) — full-text search: builds/queries a Lucene index over the document directory, including content extraction for PDF (PDFBox) and current-format Office documents (Apache POI); see the `.search-index` convention below. These are the only tested code (`scripts/` has no tests). `lib/*.groovy` is compiled, together with its third-party dependencies (Lucene/PDFBox/POI, via the `shadowJar` task in `build.gradle`), into a jar that goes on the add-on's classpath; raw `.groovy` sources placed under the add-on's `lib` node are not compiled and would fail to resolve. Groovy itself is deliberately excluded from that jar (`compileOnly` in `build.gradle`) since Freeplane already provides it at runtime.
+- `test/UtilsSpec.groovy`, `test/SearchIndexSpec.groovy` — Spock. `UtilsSpec` mocks Freeplane's node API with `Expando`; `SearchIndexSpec` runs against a real (temp-dir) Lucene index and generates its own PDF/docx fixtures via PDFBox/POI.
 - `gradle/packageAddon.gradle` — builds the add-on. **When adding or removing a script in `scripts/`, update `addonScriptDefs` too** (the build fails on a mismatch). Menu titles, execution modes, shortcuts, and per-script permissions are defined there.
 - `accelerator.properties` — shortcuts for manual installation. Add-on shortcuts live in `addonScriptDefs`, so keep both in sync.
 
@@ -33,4 +33,5 @@ Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync w
 - List items under a page's `### Next Steps` heading (up to 3) are synced into the node's children. The last run time is stored in `root > config > nextStepsUpdatedAt` and used to skip unmodified pages.
 - `root > ToDo` holds the task list. Anything under a node named `archive` is hidden by the default filter. Dates use `yy/MM/dd`.
 - Node mutations must happen on the Swing EDT (`SwingUtilities.invokeLater`); file I/O is moved off it.
-- `scripts/init/init.groovy` runs at Freeplane startup and refreshes Next Steps on map changes. Init scripts run with the *global* scripting permissions, not the add-on's per-script ones, so it invokes the update through `ScriptingEngine.executeScript` with read permission granted explicitly.
+- `scripts/init/init.groovy` runs at Freeplane startup and refreshes Next Steps and the search index on map changes. Init scripts run with the *global* scripting permissions, not the add-on's per-script ones, so it invokes the update through `ScriptingEngine.executeScript` with read and write permission granted explicitly.
+- The full-text search index lives at `<docDir>/.search-index/` (a Lucene index plus a small file tracking each indexed file's last-modified time, for incremental updates). `SearchIndex.updateIndex()` skips its own directory (and any other dot-directory) when scanning, and `FindUnlinked.groovy` explicitly excludes it too, so it's never reported as an unlinked directory.

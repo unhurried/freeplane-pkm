@@ -22,7 +22,9 @@ def unlinkedPages = []
 def unlinkedDirs = []
 def unlinkedAssets = []
 docDir.eachFile { file ->
-    if (file.isFile() && file.name.endsWith('.md') && !linkedFiles.contains(file.canonicalFile)) {
+    if (file.isDirectory() && file.name == SearchIndex.INDEX_DIR_NAME) {
+        // The search index is maintenance data, not a document - never report it.
+    } else if (file.isFile() && file.name.endsWith('.md') && !linkedFiles.contains(file.canonicalFile)) {
         unlinkedPages << file
     } else if (file.isDirectory() && file.name.endsWith('.assets')) {
         def baseName = file.name.replaceAll(/\.assets$/, '')

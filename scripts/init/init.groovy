@@ -19,11 +19,25 @@ def UPDATE_FREQUENCY_MIN = 5
 // "java.lang.IllegalArgumentException: Cannot format given Object as a Number".
 //
 // The update is therefore not run inline but as a nested script that is granted
-// read access explicitly, just like the add-on's menu scripts are.
-def UPDATE_SCRIPT = 'Utils.updateAllNextSteps(node)'
+// read and write access explicitly, just like the add-on's menu scripts are
+// (SearchIndex.updateIndex writes the Lucene index under the document
+// directory, so - unlike the Next Steps refresh alone - this also needs write
+// access, not just read).
+//
+// SearchIndex.updateIndex(), unlike Utils.updateAllNextSteps(), does not
+// background itself, so it is wrapped in Thread.start here for the same
+// reason updateAllNextSteps() backgrounds its own file reads: this listener
+// fires on the EDT, and indexing (extracting text from every new/changed
+// file) must not block it.
+def UPDATE_SCRIPT = '''\
+Utils.updateAllNextSteps(node)
+def searchDocDir = Utils.loadDocDir(node)
+Thread.start { SearchIndex.updateIndex(searchDocDir) }
+'''
 def UPDATE_PERMISSIONS = new ScriptingPermissions([
-    (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_ASKING)         : true,
-    (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_READ_RESTRICTION): true,
+    (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_ASKING)          : true,
+    (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_READ_RESTRICTION) : true,
+    (ScriptingPermissions.RESOURCES_EXECUTE_SCRIPTS_WITHOUT_WRITE_RESTRICTION): true,
 ])
 
 def lastUpdated = LocalDateTime.now()
@@ -36,14 +50,15 @@ map.addListener({
     // interval instead of on every single node change.
     lastUpdated = LocalDateTime.now()
     try {
-        // Utils.updateAllNextSteps() scans the map and reads changed pages on
-        // a background thread and returns immediately, so this call does not
-        // block the event thread. It also guards itself against overlapping
-        // scans, so firing this again before a previous (slow) scan has
+        // Both updates scan/read on a background thread and return
+        // immediately, so this call does not block the event thread. Both
+        // also guard themselves against overlapping runs (updateAllNextSteps
+        // via its own in-progress flag, updateIndex via the Lucene index
+        // lock), so firing this again before a previous (slow) run has
         // finished is safe and simply a no-op.
         ScriptingEngine.executeScript(map.root.delegate, UPDATE_SCRIPT, UPDATE_PERMISSIONS)
     } catch (Exception e) {
         // Never let this escape into the AWT event thread.
-        LogUtils.warn('failed to update next steps', e)
+        LogUtils.warn('failed to run periodic update', e)
     }
 })

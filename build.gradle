@@ -1,5 +1,6 @@
 plugins {
     id 'groovy'
+    id 'com.gradleup.shadow' version '8.3.5'
 }
 
 apply from: 'gradle/packageAddon.gradle'
@@ -30,7 +31,21 @@ sourceSets {
 }
 
 dependencies {
-    implementation 'org.apache.groovy:groovy:4.0.27'
+    // Groovy itself is not bundled into the add-on's lib jar (see shadowJar below) -
+    // Freeplane already runs on its own embedded Groovy, which provides these classes
+    // at runtime. compileOnly keeps it available for compiling lib/*.groovy without
+    // shadowJar packaging a second, potentially conflicting, copy.
+    compileOnly 'org.apache.groovy:groovy:4.0.27'
+
+    // Full-text search: index (Lucene) plus content extraction for non-Markdown
+    // formats (PDF, and current-format Office documents). These, unlike Groovy, are
+    // not provided by the Freeplane runtime, so they are bundled by shadowJar into
+    // the add-on's lib jar.
+    implementation 'org.apache.lucene:lucene-core:9.11.1'
+    implementation 'org.apache.lucene:lucene-analysis-common:9.11.1'
+    implementation 'org.apache.lucene:lucene-highlighter:9.11.1'
+    implementation 'org.apache.pdfbox:pdfbox:2.0.31'
+    implementation 'org.apache.poi:poi-ooxml:5.2.5'
 
     testImplementation 'org.apache.groovy:groovy:4.0.27'
     testImplementation platform('org.spockframework:spock-bom:2.4-M4-groovy-4.0')
@@ -38,6 +53,12 @@ dependencies {
     testRuntimeOnly 'net.bytebuddy:byte-buddy:1.17.5'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+// Produces the fat jar embedded in the add-on (see gradle/packageAddon.gradle):
+// lib/*.groovy classes plus the search dependencies above, minus Groovy itself
+// (compileOnly, so shadowJar's runtime classpath never includes it). Keeps its
+// default "-all" classifier so its output file doesn't collide with the plain
+// `jar` task's (both would otherwise write build/libs/freeplane-pkm-<version>.jar).
 
 test {
     useJUnitPlatform()
