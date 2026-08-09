@@ -115,6 +115,25 @@ class SearchIndexSpec extends Specification {
         SearchIndex.extractText(file) == ''
     }
 
+    def "extractText returns empty string instead of throwing when parsing fails with an Error rather than an Exception"() {
+        // Reproduces a real-world crash: PDFBox lazily initializes AWT font
+        // mapping on first use, and under some sandboxed environments (e.g.
+        // Freeplane's script permissions on Windows, which deny the
+        // process-exec permission PDFBox's font-directory lookup wants) that
+        // initialization fails with a NoClassDefFoundError - an Error, not an
+        // Exception. A plain "catch (Exception ...)" in extractText would let
+        // that escape and crash whatever thread called updateIndex().
+        given:
+        def file = pdfFile('Doc.pdf', 'Hello from PDF')
+        PDDocument.metaClass.static.load = { File f -> throw new NoClassDefFoundError('simulated PDFBox font-mapper init failure') }
+
+        expect:
+        SearchIndex.extractText(file) == ''
+
+        cleanup:
+        PDDocument.metaClass = null
+    }
+
     // --- Tests for updateIndex + search ---
 
     def "search finds a file by content keyword"() {

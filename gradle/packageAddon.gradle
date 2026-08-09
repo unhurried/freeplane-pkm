@@ -54,7 +54,7 @@ def addonZipEntries = [
 def addonDescription = '''Freeplane PKM builds a personal knowledge management (PKM) system on Freeplane.
 
 * Document Management: Manage links between mind map nodes and Markdown files/directories
-* Full-Text Document Search: Indexed, keyword-AND search across Markdown, PDF and Office document content and file names, with results in a dedicated dialog
+* Full-Text Document Search: Indexed, keyword-AND search across Markdown, PDF and Office document content and file names, with results in a dedicated dialog that can jump straight to the matching mind map node
 * Mind Map Search and Filtering: Search and filter mind map nodes by conditions
 * Task Management: Reflect tasks written in Markdown files into the mind map'''
 

@@ -218,6 +218,61 @@ def static collectLinkedFiles(node) {
     return linkedFiles
 }
 
+/**
+ * Maps every file linked from the subtree rooted at the given node to the
+ * node that links it, keyed by canonical File. Used to resolve a search hit
+ * (an arbitrary file under the document directory) back to the mind map node
+ * a user would want selected - see findNodeForFile().
+ *
+ * A node whose link points directly at a file (node.link.file) always wins
+ * over one that only links it indirectly, through another node
+ * (node.link.node.link.file - the other form getLinkedFile() also follows),
+ * so an intermediate "see also"-style link never shadows the node that
+ * actually represents the document.
+ */
+def static Map<File, Object> collectNodesByLinkedFile(node) {
+    def directNodesByFile = [:]
+    def indirectNodesByFile = [:]
+    collectNodesByLinkedFileRecursive(node, directNodesByFile, indirectNodesByFile)
+    return indirectNodesByFile + directNodesByFile
+}
+
+/**
+ * Resolves a file (e.g. a full-text search hit) to the mind map node that
+ * represents it, using a file->node map built by collectNodesByLinkedFile().
+ * A search hit is not always a file linked directly from a node; it may be:
+ *  - a page or directory file itself (direct match)
+ *  - a file inside a linked directory (walking up from the file to docDir,
+ *    the first ancestor directory that matches a directory node is used)
+ *  - a file under a page's "<page>.assets/" attachments directory (the
+ *    sibling "<page>.md" page node is used instead, per the page/assets
+ *    convention described in this file's class-level docs)
+ * Returns null if no node in the map links the file, any of its ancestor
+ * directories, or (for an assets file) its page.
+ */
+def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir) {
+    def canonicalDocDir = docDir.canonicalFile
+    def current = file.canonicalFile
+    def hit = nodesByFile[current]
+    if (hit) return hit
+
+    def dir = current.parentFile
+    while (dir != null) {
+        hit = nodesByFile[dir]
+        if (hit) return hit
+
+        if (dir.name.endsWith('.assets')) {
+            def pageFile = new File(dir.parentFile, dir.name.replaceAll(/\.assets$/, '') + '.md')
+            hit = nodesByFile[pageFile.canonicalFile]
+            if (hit) return hit
+        }
+
+        if (dir == canonicalDocDir) break
+        dir = dir.parentFile
+    }
+    return null
+}
+
 // --- Private helper methods ---
 
 private static List collectNodes(node) {
@@ -238,6 +293,18 @@ private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
     if (linkedFile) linkedFiles.add(linkedFile.canonicalFile)
     for (child in node.children) {
         collectLinkedFilesRecursive(child, linkedFiles)
+    }
+}
+
+private static void collectNodesByLinkedFileRecursive(node, Map direct, Map indirect) {
+    if (node.link.file) {
+        direct[node.link.file.canonicalFile] = node
+    } else {
+        def linkedFile = getLinkedFile(node)
+        if (linkedFile) indirect[linkedFile.canonicalFile] = node
+    }
+    for (child in node.children) {
+        collectNodesByLinkedFileRecursive(child, direct, indirect)
     }
 }
 

@@ -94,6 +94,18 @@ import org.apache.poi.extractor.ExtractorFactory
  * - yields an empty string rather than throwing, so one bad file only costs
  * its own content, not the rest of the scan; the file's name remains
  * searchable regardless.
+ *
+ * Catches Throwable, not just Exception: PDFBox lazily initializes AWT font
+ * mapping on first use (to substitute glyphs for non-embedded fonts), which
+ * can throw an Error (e.g. NoClassDefFoundError, wrapping an
+ * ExceptionInInitializerError) rather than an Exception when that
+ * initialization fails - e.g. under Freeplane's script sandbox, which denies
+ * the process-exec permission PDFBox's Windows font-directory lookup wants.
+ * Once that happens the affected class stays permanently broken for the rest
+ * of the JVM session, so every subsequent file hitting the same code path
+ * fails the same way; letting that Error escape here would otherwise crash
+ * whatever thread called updateIndex() (see RebuildSearchIndex.groovy and
+ * init.groovy), abandoning the whole indexing run rather than just this file.
  */
 def static String extractText(File file) {
     def ext = extensionOf(file.name)
@@ -109,7 +121,7 @@ def static String extractText(File file) {
             return ''
         }
         return text.length() > MAX_CONTENT_CHARS ? text.substring(0, MAX_CONTENT_CHARS) : text
-    } catch (Exception ignored) {
+    } catch (Throwable ignored) {
         return ''
     }
 }
