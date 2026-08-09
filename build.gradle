@@ -59,6 +59,21 @@ dependencies {
 // (compileOnly, so shadowJar's runtime classpath never includes it). Keeps its
 // default "-all" classifier so its output file doesn't collide with the plain
 // `jar` task's (both would otherwise write build/libs/freeplane-pkm-<version>.jar).
+tasks.named('shadowJar') {
+    // lucene-core is a multi-release JAR: MMapDirectory's Java 19+ implementation
+    // (MemorySegmentIndexInputProvider) lives only under META-INF/versions/19+/, not
+    // in the base class tree. shadowJar merges those versioned .class files into the
+    // fat jar but, unlike the `jar` task, does not carry over the source jars'
+    // "Multi-Release: true" manifest attribute. Without it the JVM ignores
+    // META-INF/versions/ entirely and treats the fat jar as a plain (non-multi-release)
+    // jar, so on Java 19+ (e.g. Freeplane's bundled JRE) MMapDirectory's static
+    // initializer fails to find MemorySegmentIndexInputProvider at all, throwing
+    // ClassNotFoundException -> LinkageError. Restoring the attribute here makes the
+    // JVM look under META-INF/versions/ again, as it does for the unshaded jar.
+    manifest {
+        attributes 'Multi-Release': 'true'
+    }
+}
 
 test {
     useJUnitPlatform()
