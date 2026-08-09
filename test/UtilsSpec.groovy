@@ -480,6 +480,102 @@ class UtilsSpec extends Specification {
         result.isEmpty()
     }
 
+    // --- Tests for collectNodesByLinkedFile ---
+
+    def "collectNodesByLinkedFile maps every linked file in the tree to its node"() {
+        given:
+        def fileA = tempDir.resolve('a.md').toFile()
+        def fileB = tempDir.resolve('b.md').toFile()
+        fileA.createNewFile()
+        fileB.createNewFile()
+        def childA = createMockNode(linkFile: fileA)
+        def childB = createMockNode(linkFile: fileB)
+        def middle = createMockNode(children: [childB])
+        def root = createMockNode(children: [childA, middle])
+
+        when:
+        def result = Utils.collectNodesByLinkedFile(root)
+
+        then:
+        result[fileA.canonicalFile] == childA
+        result[fileB.canonicalFile] == childB
+    }
+
+    def "collectNodesByLinkedFile prefers a direct link over an indirect one to the same file"() {
+        given:
+        def file = tempDir.resolve('shared.md').toFile()
+        file.createNewFile()
+        def directNode = createMockNode(linkFile: file)
+        def linkedNode = createMockNode(linkFile: file)
+        def indirectNode = createMockNode(linkNode: linkedNode)
+        def root = createMockNode(children: [indirectNode, directNode])
+
+        when:
+        def result = Utils.collectNodesByLinkedFile(root)
+
+        then:
+        result[file.canonicalFile] == directNode
+    }
+
+    // --- Tests for findNodeForFile ---
+
+    def "findNodeForFile resolves a directly linked page file"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Page.md')
+        pageFile.createNewFile()
+        def pageNode = createMockNode(linkFile: pageFile)
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: [pageNode]))
+
+        expect:
+        Utils.findNodeForFile(nodesByFile, pageFile, docDir) == pageNode
+    }
+
+    def "findNodeForFile resolves a file inside a linked directory to the directory node"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def subDir = new File(docDir, 'Sub')
+        subDir.mkdirs()
+        def nestedFile = new File(subDir, 'nested.pdf')
+        nestedFile.createNewFile()
+        def dirNode = createMockNode(linkFile: subDir)
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: [dirNode]))
+
+        expect:
+        Utils.findNodeForFile(nodesByFile, nestedFile, docDir) == dirNode
+    }
+
+    def "findNodeForFile resolves a file under a page's assets directory to the page node"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Page.md')
+        pageFile.createNewFile()
+        def assetsDir = new File(docDir, 'Page.assets')
+        assetsDir.mkdirs()
+        def assetFile = new File(assetsDir, 'image.png')
+        assetFile.createNewFile()
+        def pageNode = createMockNode(linkFile: pageFile)
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: [pageNode]))
+
+        expect:
+        Utils.findNodeForFile(nodesByFile, assetFile, docDir) == pageNode
+    }
+
+    def "findNodeForFile returns null when no node links the file or any ancestor"() {
+        given:
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def orphanFile = new File(docDir, 'orphan.md')
+        orphanFile.createNewFile()
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: []))
+
+        expect:
+        Utils.findNodeForFile(nodesByFile, orphanFile, docDir) == null
+    }
+
     def "updateNextSteps clears existing children before adding new ones"() {
         given:
         def docDir = tempDir.resolve('docs').toFile()

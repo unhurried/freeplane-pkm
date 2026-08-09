@@ -3,15 +3,18 @@
 // This task replicates what the Freeplane devtools add-on (checkAddOn.groovy +
 // releaseAddOn.groovy) does, without requiring a running Freeplane instance:
 //  - scripts/*.groovy are embedded as script nodes (source code in a child node)
-//  - lib/*.groovy is compiled into a jar (via the standard Gradle `jar` task) and
-//    embedded base64-encoded under the "lib" node (installed to
-//    <userdir>/addons/<name>/lib, which is added to the add-on's script classpath).
-//    Per Freeplane's add-on docs, the lib node is for binary files (jars); a raw
-//    .groovy source file placed there is not compiled or added to the classpath,
+//  - lib/*.groovy is compiled together with its third-party dependencies (Lucene,
+//    PDFBox, Apache POI - used by SearchIndex.groovy) into a single fat jar via the
+//    shadowJar task (see build.gradle), embedded base64-encoded under the "lib" node
+//    (installed to <userdir>/addons/<name>/lib, which is added to the add-on's script
+//    classpath). Per Freeplane's add-on docs, the lib node is for binary files (jars);
+//    a raw .groovy source file placed there is not compiled or added to the classpath,
 //    so classes it defines (e.g. Utils) would fail to resolve from addon scripts.
-//  - scripts/template.md, scripts/find.search-ms.template and scripts/init/init.groovy
-//    are packed into a zip under the "zips" node (extracted into <userdir>, so the
-//    scripts keep finding them at <userdir>/scripts/...)
+//    Groovy itself is deliberately left out of the fat jar (see build.gradle) since
+//    Freeplane already runs on its own embedded Groovy.
+//  - scripts/template.md and scripts/init/init.groovy are packed into a zip under the
+//    "zips" node (extracted into <userdir>, so the scripts keep finding them at
+//    <userdir>/scripts/...)
 
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -38,20 +41,20 @@ def addonScriptDefs = [
     [file: 'UpdateNextSteps.groovy',         title: 'Update Next Steps',          mode: 'on_selected_node', shortcut: 'F8',  exec: false],
     [file: 'Filter.groovy',                  title: 'Filter',                     mode: 'on_selected_node', shortcut: 'F5',  exec: false],
     [file: 'FindUnlinked.groovy',            title: 'Find Unlinked',              mode: 'on_single_node',   shortcut: '',    exec: false],
-    [file: 'SearchWithInazumaSearch.groovy', title: 'Search with InazumaSearch',  mode: 'on_selected_node', shortcut: 'F6',  exec: true],
-    [file: 'SearchWithWindowsSearch.groovy', title: 'Search with Windows Search', mode: 'on_single_node',   shortcut: '',    exec: true],
+    [file: 'Search.groovy',                  title: 'Search',                     mode: 'on_single_node',   shortcut: 'F6',  exec: true],
+    [file: 'RebuildSearchIndex.groovy',      title: 'Update Search Index',        mode: 'on_single_node',   shortcut: '',    exec: false],
 ]
 
 // Files extracted into the user directory on installation (zip entry path -> project file).
 def addonZipEntries = [
-    'scripts/template.md'            : 'scripts/template.md',
-    'scripts/find.search-ms.template': 'scripts/find.search-ms.template',
-    'scripts/init/init.groovy'       : 'scripts/init/init.groovy',
+    'scripts/template.md'     : 'scripts/template.md',
+    'scripts/init/init.groovy': 'scripts/init/init.groovy',
 ]
 
 def addonDescription = '''Freeplane PKM builds a personal knowledge management (PKM) system on Freeplane.
 
 * Document Management: Manage links between mind map nodes and Markdown files/directories
+* Full-Text Document Search: Indexed, keyword-AND search across Markdown, PDF and Office document content and file names, with results in a dedicated dialog that can jump straight to the matching mind map node
 * Mind Map Search and Filtering: Search and filter mind map nodes by conditions
 * Task Management: Reflect tasks written in Markdown files into the mind map'''
 
@@ -119,9 +122,9 @@ tasks.register('packageAddon') {
     group = 'distribution'
     description = 'Packages the project as a Freeplane add-on (*.addon.mm).'
 
-    dependsOn tasks.named('jar')
+    dependsOn tasks.named('shadowJar')
     inputs.dir file('scripts')
-    inputs.file tasks.named('jar').flatMap { it.archiveFile }
+    inputs.file tasks.named('shadowJar').flatMap { it.archiveFile }
     inputs.property 'addonVersion', providers.gradleProperty('addonVersion').orElse(project.version.toString())
     outputs.dir layout.buildDirectory.dir('addon')
 
@@ -140,9 +143,10 @@ tasks.register('packageAddon') {
                 "  missing in scripts/: ${declaredScripts - actualScripts}")
         }
 
-        // lib/*.groovy is compiled into a jar (see build.gradle: sourceSets.main.groovy.srcDirs
-        // = ['lib']); the jar - not the raw sources - is what goes on the add-on's classpath.
-        def libFiles = [tasks.jar.archiveFile.get().asFile]
+        // lib/*.groovy is compiled together with its third-party dependencies into a fat
+        // jar by shadowJar (see build.gradle: sourceSets.main.groovy.srcDirs = ['lib']);
+        // that jar - not the raw sources - is what goes on the add-on's classpath.
+        def libFiles = [tasks.shadowJar.archiveFile.get().asFile]
         def zipEntryFiles = addonZipEntries.collectEntries { path, projectPath ->
             def f = file(projectPath)
             if (!f.file) throw new GradleException("Missing file for zip entry: $projectPath")
