@@ -227,7 +227,7 @@ try {
 def dialog = new JDialog(owner, 'Search', false)
 dialog.defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
 dialog.contentPane = content
-dialog.size = new Dimension(760, 450)
+dialog.size = new Dimension(960, 540)
 dialog.setLocationRelativeTo(owner)
 dialog.visible = true
 keywordField.requestFocusInWindow()
