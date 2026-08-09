@@ -193,6 +193,93 @@ class SearchIndexSpec extends Specification {
         hits[0].snippet.contains('mountains')
     }
 
+    def "search finds Japanese content by morphological unit, not just substring"() {
+        given:
+        textFile('Kyoto.md', '京都で機械学習の勉強をした。')
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, '機械学習').size() == 1
+        SearchIndex.search(docDir, '勉強').size() == 1
+    }
+
+    def "search does not false-match a Japanese keyword against an unrelated word merely containing the same characters"() {
+        given:
+        // Under bigram tokenization, searching "京都" ("Kyoto") would also match
+        // this file, since it merely contains the same two characters in sequence
+        // as part of "東京都" ("Tokyo"). Morphological analysis tokenizes "東京都"
+        // as its own word(s), distinct from "京都".
+        textFile('Tokyo.md', '東京都に住んでいる。')
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, '京都') == []
+    }
+
+    def "search matches a Japanese keyword against an inflected form of the same word"() {
+        given:
+        textFile('Alpha.md', '週末に本を読んだ。')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, '読む')
+
+        then:
+        hits.size() == 1
+        hits[0].relativePath == 'Alpha.md'
+    }
+
+    def "search matches a katakana keyword regardless of long-vowel stemming"() {
+        given:
+        textFile('Alpha.md', '新しいコンピューターを買った。')
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, 'コンピュータ').size() == 1
+    }
+
+    def "search matches Japanese file names as well as content"() {
+        given:
+        textFile('会議議事録.md', 'nothing relevant in here')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, '議事録')
+
+        then:
+        hits.size() == 1
+        hits[0].relativePath == '会議議事録.md'
+    }
+
+    def "search combines a Japanese and an English keyword with AND"() {
+        given:
+        textFile('Alpha.md', '機械学習について学ぶ good notes')
+        textFile('Beta.md', '機械学習について学ぶ')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, '機械学習 good')
+
+        then:
+        hits.size() == 1
+        hits[0].relativePath == 'Alpha.md'
+    }
+
+    def "updateIndex rebuilds the whole index when the schema version on disk is stale"() {
+        given:
+        textFile('Alpha.md', '機械学習の勉強をした。')
+        SearchIndex.updateIndex(docDir)
+        assert SearchIndex.search(docDir, '機械学習').size() == 1
+
+        when: 'the on-disk schema version is rolled back without touching any document'
+        def versionFile = new File(docDir, "${SearchIndex.INDEX_DIR_NAME}/index.version")
+        versionFile.text = '0'
+        SearchIndex.updateIndex(docDir)
+
+        then: 'the index is rebuilt from scratch and remains searchable'
+        SearchIndex.search(docDir, '機械学習').size() == 1
+    }
+
     def "search returns no results for an unindexed document directory"() {
         expect:
         SearchIndex.search(docDir, 'anything') == []

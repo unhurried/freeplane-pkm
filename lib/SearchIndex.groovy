@@ -4,15 +4,15 @@ import org.apache.lucene.analysis.Analyzer
 import org.apache.lucene.analysis.Analyzer.TokenStreamComponents
 import org.apache.lucene.analysis.CharArraySet
 import org.apache.lucene.analysis.LowerCaseFilter
-import org.apache.lucene.analysis.Tokenizer
-import org.apache.lucene.analysis.cjk.CJKAnalyzer
-import org.apache.lucene.analysis.cjk.CJKBigramFilter
+import org.apache.lucene.analysis.TokenStream
 import org.apache.lucene.analysis.cjk.CJKWidthFilter
+import org.apache.lucene.analysis.ja.JapaneseBaseFormFilter
+import org.apache.lucene.analysis.ja.JapaneseKatakanaStemFilter
+import org.apache.lucene.analysis.ja.JapaneseTokenizer
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper
 import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute
-import org.apache.lucene.analysis.util.CharTokenizer
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.document.StringField
@@ -38,8 +38,6 @@ import org.apache.pdfbox.text.PDFTextStripper
 
 import org.apache.poi.extractor.ExtractorFactory
 
-import java.util.function.IntPredicate
-
 // Full-text search over the document directory: builds/updates a Lucene index
 // (updateIndex) and queries it (search). Content extraction for non-plain-text
 // formats is handled here too (extractText), so it can be unit-tested on its
@@ -54,6 +52,14 @@ import java.util.function.IntPredicate
 
 @Field private static final String LUCENE_SUBDIR_NAME = 'lucene'
 @Field private static final String META_FILE_NAME = 'files.meta'
+@Field private static final String VERSION_FILE_NAME = 'index.version'
+// Bump whenever the analyzer or field configuration changes in a way that makes
+// previously-indexed tokens stop matching newly-indexed ones (e.g. switching the
+// Japanese tokenization strategy, as in this version). updateIndex() detects a
+// mismatch against the on-disk index.version file and does a full re-index rather
+// than an incremental one, so a stale/incompatible index never silently returns
+// wrong (or zero) results after an add-on update.
+@Field private static final int INDEX_SCHEMA_VERSION = 1
 
 @Field private static final String FIELD_PATH = 'path'
 @Field private static final String FIELD_FILENAME = 'filename'
@@ -73,7 +79,7 @@ import java.util.function.IntPredicate
 @Field private static final int DEFAULT_MAX_RESULTS = 100
 
 // Flags for the filename field's WordDelimiterGraphFilter (see
-// newFilenameAnalyzer): split a run of letters/digits on case change
+// newJapaneseAnalyzer): split a run of letters/digits on case change
 // ("QuarterlyReport" -> "Quarterly"/"Report") and on letter/digit boundaries
 // ("Report2024" -> "Report"/"2024"), emitting both the word and number parts.
 @Field private static final int FILENAME_SPLIT_FLAGS =
@@ -116,6 +122,13 @@ def static String extractText(File file) {
  * untouched. Safe to call repeatedly and often (e.g. from a periodic
  * listener) - a fully up-to-date directory does no extraction work at all.
  *
+ * If the on-disk index predates the current INDEX_SCHEMA_VERSION (including
+ * one built before schema versioning existed at all), every file is instead
+ * (re-)extracted and (re-)added regardless of its recorded mtime, and every
+ * previously-indexed document is dropped first - so tokens from an
+ * incompatible analyzer/field configuration can never linger in, or alongside,
+ * the rebuilt index.
+ *
  * If the index is already locked by a concurrent update (e.g. the periodic
  * listener and a manual rebuild firing at the same time), this call is a
  * silent no-op: the other update will bring the index up to date instead.
@@ -125,8 +138,8 @@ def static void updateIndex(File docDir) {
     def luceneDir = new File(indexDir, LUCENE_SUBDIR_NAME)
     luceneDir.mkdirs()
     def metaFile = new File(indexDir, META_FILE_NAME)
-
-    def knownMTimes = loadMeta(metaFile)
+    def versionFile = new File(indexDir, VERSION_FILE_NAME)
+    def storedVersion = readVersion(versionFile)
     def seenPaths = new HashSet<String>()
 
     FSDirectory.open(luceneDir.toPath()).withCloseable { directory ->
@@ -140,7 +153,15 @@ def static void updateIndex(File docDir) {
             return
         }
 
+        // Checked only once the index lock is actually held, so a lock
+        // conflict here never discards a still-good meta/version file (see
+        // below: on that path this closure returns before either is touched).
+        def schemaChanged = storedVersion != INDEX_SCHEMA_VERSION
+        def knownMTimes = schemaChanged ? [:] : loadMeta(metaFile)
+
         writer.withCloseable {
+            if (schemaChanged) writer.deleteAll()
+
             eachIndexableFile(docDir) { file, relPath ->
                 seenPaths << relPath
                 def mtime = file.lastModified()
@@ -161,9 +182,13 @@ def static void updateIndex(File docDir) {
 
             writer.commit()
         }
-    }
 
-    saveMeta(metaFile, knownMTimes)
+        // Only reached once the writer above has committed successfully, so a
+        // failed/interrupted rebuild is retried in full on the next call
+        // instead of being (incorrectly) marked as done.
+        saveMeta(metaFile, knownMTimes)
+        if (schemaChanged) versionFile.text = INDEX_SCHEMA_VERSION as String
+    }
 }
 
 /**
@@ -199,37 +224,54 @@ def static List<SearchHit> search(File docDir, String queryText, int maxResults 
 // --- Private helper methods ---
 
 private static newAnalyzer() {
-    // CJKAnalyzer bigram-tokenizes CJK scripts - giving reasonable Japanese
-    // keyword search without a full morphological analyzer/dictionary - while
-    // still doing ordinary word tokenization (and lowercasing, for
-    // case-insensitivity) on Latin text. The empty stop-word set keeps every
-    // typed keyword significant instead of silently dropping common English
-    // words such as "a"/"the".
+    // JapaneseTokenizer (Kuromoji) does real morphological analysis - using its
+    // bundled IPADIC dictionary to split text into actual words and normalize
+    // inflected forms to their dictionary (base) form - rather than the
+    // mechanical bigram splitting of a CJK bigram analyzer. That avoids two
+    // classes of bad result: false matches from bigrams that happen to
+    // straddle unrelated words (searching "京都" ("Kyoto") would otherwise
+    // also match "東京都" ("Tokyo"), which merely contains the same two
+    // characters in sequence), and missed matches on inflected forms (a
+    // search for the dictionary form "読む" ("read") would otherwise not
+    // find "読んだ" ("read", past tense)). SEARCH mode additionally splits
+    // long compound nouns into their parts (e.g. "関西国際空港" ->
+    // "関西"/"国際"/"空港"), so a search for one part still matches; ordinary
+    // (non-CJK) text is tokenized word-by-word same as before, and lowercased
+    // for case-insensitivity. The empty stop-word set keeps every typed
+    // keyword significant instead of silently dropping common words.
     //
-    // The filename field uses a different analyzer (see newFilenameAnalyzer):
-    // CJKAnalyzer's tokenizer follows Unicode text segmentation, which keeps
-    // "." between two letter runs inside one token - so "Report.md" would
-    // tokenize as a single "report.md" token, and a search for "Report" alone
-    // would never match it. Filenames need every non-alphanumeric character
-    // (., _, -, spaces, ...) to be a hard break instead.
-    def contentAnalyzer = new CJKAnalyzer(CharArraySet.EMPTY_SET)
-    return new PerFieldAnalyzerWrapper(contentAnalyzer, [(FIELD_FILENAME): newFilenameAnalyzer()])
+    // The filename field uses the same analyzer with one addition (see
+    // newJapaneseAnalyzer): it also splits on case/digit boundaries, so e.g.
+    // "QuarterlyReport" is searchable as "Quarterly" alone.
+    def contentAnalyzer = newJapaneseAnalyzer(false)
+    return new PerFieldAnalyzerWrapper(contentAnalyzer, [(FIELD_FILENAME): newJapaneseAnalyzer(true)])
 }
 
-private static Analyzer newFilenameAnalyzer() {
+private static Analyzer newJapaneseAnalyzer(boolean forFilename) {
     return new Analyzer() {
         @Override
         protected TokenStreamComponents createComponents(String fieldName) {
-            Tokenizer tokenizer = CharTokenizer.fromTokenCharPredicate(
-                    { int c -> Character.isLetterOrDigit(c) } as IntPredicate)
-            // WordDelimiterGraphFilter further splits "QuarterlyReport" into
-            // "Quarterly"/"Report" (case change) and "Report2024" into
-            // "Report"/"2024" (letter/digit change); it needs to run before
-            // lowercasing, since it splits on case. The rest of the pipeline
-            // mirrors CJKAnalyzer's, so a Japanese filename is searchable the
-            // same way Japanese content is; only the tokenizer differs.
-            def stream = new WordDelimiterGraphFilter(new CJKWidthFilter(tokenizer), FILENAME_SPLIT_FLAGS, CharArraySet.EMPTY_SET)
-            stream = new CJKBigramFilter(new LowerCaseFilter(stream))
+            // discardPunctuation drops "." "_" "-" spaces etc. as hard token
+            // breaks, so (for the filename field) "Report.md" tokenizes as
+            // "Report"/"md" rather than one token, letting a search for
+            // "Report" alone match. discardCompoundToken suppresses the
+            // original, undivided compound token that SEARCH mode would
+            // otherwise additionally emit at the same position as its parts;
+            // keeping only the split parts gives a flat token sequence, which
+            // is what fieldQueryFor()'s PhraseQuery construction (built from
+            // consecutive token positions) assumes.
+            def tokenizer = new JapaneseTokenizer(null, true, true, JapaneseTokenizer.Mode.SEARCH)
+            TokenStream stream = new JapaneseBaseFormFilter(tokenizer) // "読んだ" -> "読む"
+            stream = new CJKWidthFilter(stream)                       // normalize full/half-width forms
+            stream = new JapaneseKatakanaStemFilter(stream)           // "コンピューター" -> "コンピュータ"
+            if (forFilename) {
+                // Further splits "QuarterlyReport" into "Quarterly"/"Report"
+                // (case change) and "Report2024" into "Report"/"2024"
+                // (letter/digit change); must run before lowercasing, since
+                // it splits on case.
+                stream = new WordDelimiterGraphFilter(stream, FILENAME_SPLIT_FLAGS, CharArraySet.EMPTY_SET)
+            }
+            stream = new LowerCaseFilter(stream)
             return new TokenStreamComponents(tokenizer, stream)
         }
     }
@@ -323,12 +365,13 @@ private static fieldQueryFor(analyzer, String field, String keyword, float boost
     if (!tokens) return null
     if (tokens.size() == 1) return new BoostQuery(new TermQuery(new Term(field, tokens[0].text)), boost)
 
-    // A keyword that tokenizes to several tokens - CJK text (bigrammed by
-    // CJKAnalyzer) or a filename fragment split on a case/digit boundary (by
-    // WordDelimiterGraphFilter) - is required to match as a contiguous
-    // phrase, at the same relative positions the analyzer produced, so e.g.
-    // "検索機能" matches "検索機能" but not unrelated text that merely
-    // contains both bigrams somewhere else in the field.
+    // A keyword that tokenizes to several tokens - CJK text split into
+    // multiple words by JapaneseTokenizer, or a filename fragment split on a
+    // case/digit boundary by WordDelimiterGraphFilter - is required to match
+    // as a contiguous phrase, at the same relative positions the analyzer
+    // produced, so e.g. "検索機能" ("search function") matches "検索機能" but
+    // not unrelated text that merely contains both of its words somewhere
+    // else in the field.
     def phrase = new PhraseQuery.Builder()
     tokens.each { token -> phrase.add(new Term(field, token.text), token.position) }
     return new BoostQuery(phrase.build(), boost)
@@ -401,4 +444,18 @@ private static void saveMeta(File metaFile, Map<String, Long> mtimes) {
     def props = new Properties()
     mtimes.each { relPath, mtime -> props.setProperty(relPath, mtime as String) }
     metaFile.withWriter('UTF-8') { writer -> props.store(writer, null) }
+}
+
+// -1 never matches a real INDEX_SCHEMA_VERSION (versions start at 1), so both
+// a missing file (no version has ever been recorded - e.g. an index built
+// before schema versioning existed, or before this dictionary-based Japanese
+// analyzer replaced the earlier bigram one) and a corrupt one are treated the
+// same as any other mismatch: trigger a full rebuild.
+private static int readVersion(File versionFile) {
+    if (!versionFile.exists()) return -1
+    try {
+        return Integer.parseInt(versionFile.text.trim())
+    } catch (Exception ignored) {
+        return -1
+    }
 }
