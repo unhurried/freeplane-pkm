@@ -235,8 +235,8 @@ updateActionButtons()
 
 // Bring the index up to date in the background as soon as the dialog opens,
 // so results reflect files added/changed since the last periodic refresh
-// (see init.groovy) without the user having to run "Update Search Index"
-// first. Search still works against whatever is currently on disk while
+// (see init.groovy) without the user having to run "Update Next Steps and
+// Search Index" first. Search still works against whatever is currently on disk while
 // this runs, and simply may miss the most recent changes until it finishes.
 statusLabel.text = 'Updating search index...'
 Thread.start {

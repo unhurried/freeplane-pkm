@@ -131,7 +131,7 @@ def static updateAllNextSteps(node) {
 
     // A single, cheap directory check - resolved eagerly and synchronously so
     // a missing/misconfigured docDir still fails fast and visibly to callers
-    // such as the manual "Update Next Steps" command. Resolving it once here
+    // such as the manual "Update Next Steps and Search Index" command. Resolving it once here
     // (instead of per node, as getPageFile()/loadDocDir() would) also avoids
     // re-walking the config node and re-stat'ing docDir for every node below.
     def docDir = Utils.loadDocDir(root)

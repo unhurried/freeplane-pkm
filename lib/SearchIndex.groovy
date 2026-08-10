@@ -104,7 +104,7 @@ import org.apache.poi.extractor.ExtractorFactory
  * Once that happens the affected class stays permanently broken for the rest
  * of the JVM session, so every subsequent file hitting the same code path
  * fails the same way; letting that Error escape here would otherwise crash
- * whatever thread called updateIndex() (see RebuildSearchIndex.groovy and
+ * whatever thread called updateIndex() (see Update.groovy and
  * init.groovy), abandoning the whole indexing run rather than just this file.
  */
 def static String extractText(File file) {
