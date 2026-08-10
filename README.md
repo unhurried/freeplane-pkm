@@ -11,25 +11,11 @@ Freeplane PKM is a project for building a personal knowledge management (PKM) sy
 
 ## Installation
 
-### As a Freeplane Add-on (recommended)
-
 1. Download `freeplane-pkm-<version>.addon.mm` from the [releases page](https://github.com/unhurried/freeplane-pkm/releases).
 2. In Freeplane, select Tools → Add-ons → Search and Install, choose the downloaded file, and install it.
 3. Restart Freeplane.
 
-The scripts are available under Tools → Scripts → Freeplane PKM, with keyboard shortcuts (F5–F12) assigned automatically. Note that the built-in action shortcuts in `accelerator.properties` (F1–F4) are not set by the add-on; assign them manually via Tools → Assign hot key if needed.
-
-### Manual Installation
-
-Register this project's scripts as Freeplane scripts.
-
-1. Build the classpath jar: `gradle shadowJar` (produces `build/libs/freeplane-pkm-<version>-all.jar`). `lib/*.groovy` alone is not enough to copy directly: it depends on third-party libraries (Lucene, PDFBox, Apache POI) that only `shadowJar`'s output bundles alongside the compiled `Utils`/`SearchIndex` classes.
-2. Start Freeplane.
-3. Select Tools → Open user directory.
-4. Copy the following into the user directory:
-  - `build/libs/freeplane-pkm-<version>-all.jar` → `lib/`
-  - `scripts/`
-  - `accelerator.properties`
+The scripts are available under Tools → Scripts → Freeplane PKM, with keyboard shortcuts (F1–F10, F12) assigned automatically.
 
 ## Full-Text Document Search
 
@@ -41,65 +27,22 @@ Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a sea
 - **Index**: kept at `<docDir>/.search-index/` (a Lucene index plus a small file recording each indexed file's last-modified time, used to skip unchanged files on the next update). It refreshes automatically every few minutes while a map is open, and whenever the Search dialog itself opens; run Tools → Scripts → Freeplane PKM → Update Search Index to refresh it on demand instead of waiting.
 - This replaces the previous reliance on Windows Search / Inazuma Search - the index and search UI are entirely built into the add-on, so no external search tool needs to be installed.
 
-## Development Setup
+## Development
 
 ### Requirements
 
-- **Java**: JDK 11 or later
+- **Java**: JDK 17
 - **Gradle**: 7.0 or later (can be installed automatically with the Gradle wrapper)
 - **Freeplane**: Latest version (used as the script runtime environment)
 
-### Setup Steps
+### Build and Test
 
 ```bash
-# Clone the project
-git clone <repository-url>
-cd freeplane-pkm
-
-# (Optional) Download dependencies
-gradle dependencies
+gradle build   # compile + test
+gradle test    # tests only
 ```
 
-## Build and Test
-
-### Build the Project
-
-```bash
-gradle build
-```
-
-This command does the following:
-- Compiles the source code (Groovy)
-- Runs the tests
-- Generates build artifacts (output to the `build/` directory)
-
-### Run Tests
-
-```bash
-# Run all tests
-gradle test
-
-# Run only a specific test class
-gradle test --tests UtilsSpec
-```
-
-## Troubleshooting
-
-### Build Errors
-
-```bash
-# Clear the cache and rebuild
-gradle clean build
-```
-
-### Test Failures
-
-```bash
-# Run tests with detailed logging
-gradle test --info
-```
-
-## Packaging as a Freeplane Add-on
+### Packaging as a Freeplane Add-on
 
 ```bash
 gradle packageAddon                        # uses addonDefaultVersion from gradle.properties

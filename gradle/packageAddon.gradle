@@ -25,7 +25,7 @@ def addonAuthor = 'unhurried'
 def addonHomepage = 'https://github.com/unhurried/freeplane-pkm'
 def addonFreeplaneVersionFrom = 'v1.11.1'
 
-// Menu order, titles, execution modes and keyboard shortcuts (from accelerator.properties).
+// Menu order, titles, execution modes and keyboard shortcuts.
 def addonScriptDefs = [
     [file: 'NewMapView.groovy',              title: 'New Map View',               mode: 'on_single_node',   shortcut: 'F1',  exec: false],
     [file: 'Edit.groovy',                    title: 'Edit',                       mode: 'on_single_node',   shortcut: 'F2',  exec: false],
