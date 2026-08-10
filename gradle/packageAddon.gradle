@@ -37,7 +37,6 @@ def addonScriptDefs = [
     [file: 'AddAssets.groovy',               title: 'Add Assets',                 mode: 'on_single_node',   shortcut: '',    exec: false],
     [file: 'AddToToDo.groovy',               title: 'Add to ToDo',                mode: 'on_selected_node', shortcut: 'F7',  exec: false],
     [file: 'ToggleCheckmark.groovy',         title: 'Toggle Checkmark',           mode: 'on_selected_node', shortcut: '',    exec: false],
-    [file: 'ShowToDo.groovy',                title: 'Show ToDo',                  mode: 'on_single_node',   shortcut: '',    exec: false],
     [file: 'UpdateNextSteps.groovy',         title: 'Update Next Steps',          mode: 'on_selected_node', shortcut: 'F8',  exec: false],
     [file: 'Filter.groovy',                  title: 'Filter',                     mode: 'on_selected_node', shortcut: 'F5',  exec: false],
     [file: 'FindUnlinked.groovy',            title: 'Find Unlinked',              mode: 'on_single_node',   shortcut: '',    exec: false],
