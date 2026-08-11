@@ -33,14 +33,14 @@ def addonScriptDefs = [
     [file: 'UnfoldOneLevel.groovy',          title: 'Unfold One Level',           mode: 'on_single_node',   shortcut: 'F4',  exec: false],
     [file: 'NewPage.groovy',                 title: 'New Page',                   mode: 'on_selected_node', shortcut: 'F9',  exec: true],
     [file: 'NewDirectory.groovy',            title: 'New Directory',              mode: 'on_selected_node', shortcut: 'F10', exec: true],
-    [file: 'Delete.groovy',                  title: 'Delete',                     mode: 'on_selected_node', shortcut: 'F12', exec: false],
+    [file: 'Delete.groovy',                  title: 'Delete',                     mode: 'on_selected_node', shortcut: 'F11', exec: false],
     [file: 'AddAssets.groovy',               title: 'Add Assets',                 mode: 'on_single_node',   shortcut: '',    exec: false],
-    [file: 'AddToToDo.groovy',               title: 'Add to ToDo',                mode: 'on_selected_node', shortcut: 'F7',  exec: false],
-    [file: 'ToggleCheckmark.groovy',         title: 'Toggle Checkmark',           mode: 'on_selected_node', shortcut: '',    exec: false],
+    [file: 'AddToToDo.groovy',               title: 'Add to ToDo',                mode: 'on_selected_node', shortcut: 'F8',  exec: false],
+    [file: 'ToggleCheckmark.groovy',         title: 'Toggle Checkmark',           mode: 'on_selected_node', shortcut: 'F7',  exec: false],
     [file: 'Filter.groovy',                  title: 'Filter',                     mode: 'on_selected_node', shortcut: 'F5',  exec: false],
     [file: 'FindUnlinked.groovy',            title: 'Find Unlinked',              mode: 'on_single_node',   shortcut: '',    exec: false],
     [file: 'Search.groovy',                  title: 'Search',                     mode: 'on_single_node',   shortcut: 'F6',  exec: true],
-    [file: 'Update.groovy',                  title: 'Update Next Steps and Search Index', mode: 'on_single_node', shortcut: 'F8', exec: false],
+    [file: 'Update.groovy',                  title: 'Update Next Steps and Search Index', mode: 'on_single_node', shortcut: 'F12', exec: false],
 ]
 
 // Files extracted into the user directory on installation (zip entry path -> project file).
