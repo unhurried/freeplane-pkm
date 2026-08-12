@@ -51,6 +51,12 @@ dependencies {
     implementation 'org.apache.poi:poi-ooxml:5.2.5'
 
     testImplementation 'org.apache.groovy:groovy:4.0.27'
+    // Freeplane runs the add-on on a full Groovy distribution, so scripts/*.groovy may
+    // use its extension modules (e.g. Date.format() in NewPage.groovy, LocalDate.format()
+    // parsing in Filter.groovy). Compiling lib/ only needs groovy core, so the modules
+    // the script specs exercise are added to the test runtime instead.
+    testImplementation 'org.apache.groovy:groovy-dateutil:4.0.27'
+    testImplementation 'org.apache.groovy:groovy-datetime:4.0.27'
     testImplementation platform('org.spockframework:spock-bom:2.4-M4-groovy-4.0')
     testImplementation 'org.spockframework:spock-core'
     testRuntimeOnly 'net.bytebuddy:byte-buddy:1.17.5'
@@ -88,5 +94,26 @@ test {
     // shell, which only allows writes under $TMPDIR). Forward it through when set.
     if (System.getenv('TMPDIR')) {
         systemProperty 'java.io.tmpdir', System.getenv('TMPDIR')
+    }
+
+    // A failure Gradle cannot render (e.g. a test fake whose toString() recurses -
+    // see the testing policy in CLAUDE.md) makes its JUnit listener throw while
+    // reporting, which silently downgrades the failed test to "skipped" and leaves
+    // the build green. Nothing here is meant to be skipped, so treat it as a failure.
+    def skippedTests = []
+    addTestListener(new TestListener() {
+        void beforeSuite(TestDescriptor suite) {}
+        void afterSuite(TestDescriptor suite, TestResult result) {}
+        void beforeTest(TestDescriptor testDescriptor) {}
+        void afterTest(TestDescriptor descriptor, TestResult result) {
+            if (result.resultType == TestResult.ResultType.SKIPPED) {
+                skippedTests << "${descriptor.className}.${descriptor.name}"
+            }
+        }
+    })
+    doLast {
+        if (skippedTests) {
+            throw new GradleException("Tests were skipped instead of run: ${skippedTests.join(', ')}")
+        }
     }
 }

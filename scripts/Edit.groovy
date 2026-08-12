@@ -43,9 +43,15 @@ def renamePage(ui, node, docDir, pageName, newName) {
         return
     }
 
+    // Literal (String.replace), not regex (String.replaceAll): a page name is free
+    // text, and INVALID_CHARS_PATTERN below only rejects file system reserved
+    // characters, so names may legitimately contain regex metacharacters. Treating
+    // them as a pattern either throws (e.g. "Memo [1]") or, worse, silently fails to
+    // match (e.g. "C++ Memo", where "++" is a valid possessive quantifier), leaving
+    // the renamed page pointing at its old, no longer existing, assets directory.
     def pageText = newPageFile.text
-    pageText = pageText.replaceAll(pageName + '.md', newName + '.md')
-    pageText = pageText.replaceAll(pageName + '.assets', newName + '.assets')
+    pageText = pageText.replace(pageName + '.md', newName + '.md')
+    pageText = pageText.replace(pageName + '.assets', newName + '.assets')
 
     byte[] BOM = [(byte) 0xEF, (byte) 0xBB, (byte) 0xBF]
     newPageFile.bytes = BOM
