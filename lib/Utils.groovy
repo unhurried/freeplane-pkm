@@ -273,6 +273,18 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
     return null
 }
 
+/**
+ * Opens a file or directory in the OS's default application.
+ *
+ * A thin wrapper over java.awt.Desktop, kept here rather than called inline from
+ * the scripts so that the scripts stay drivable from a test: Desktop is both
+ * unavailable in a headless JVM and genuinely side-effecting (it spawns an
+ * external application), so tests replace this method instead.
+ */
+def static openInDesktop(File file) {
+    java.awt.Desktop.getDesktop().open(file)
+}
+
 // --- Private helper methods ---
 
 private static List collectNodes(node) {

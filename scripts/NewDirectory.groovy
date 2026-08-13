@@ -16,4 +16,4 @@ if (directoryDir.exists()) {
 directoryDir.mkdir()
 
 node.link.file = directoryDir
-java.awt.Desktop.getDesktop().open(directoryDir)
+Utils.openInDesktop(directoryDir)

@@ -37,4 +37,4 @@ pageFile.bytes = BOM
 pageFile.append(pageText, 'UTF-8')
 
 node.link.file = pageFile
-java.awt.Desktop.getDesktop().open(pageFile)
+Utils.openInDesktop(pageFile)
