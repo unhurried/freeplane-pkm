@@ -20,6 +20,7 @@ class UtilsSpec extends Specification {
         node.link.file = props.linkFile
         node.link.node = props.linkNode
         node.mindMap = props.mindMap
+        node.getParent = { -> props.parent }
         node.getChildren = { -> node.children }
         node.createChild = { ->
             def child = createMockNode()
@@ -574,6 +575,26 @@ class UtilsSpec extends Specification {
 
         expect:
         Utils.findNodeForFile(nodesByFile, orphanFile, docDir) == null
+    }
+
+    // --- Tests for nodePathText ---
+
+    def "nodePathText returns the node's own text when it has no parent"() {
+        given:
+        def rootNode = createMockNode(text: 'root')
+
+        expect:
+        Utils.nodePathText(rootNode) == 'root'
+    }
+
+    def "nodePathText joins the ancestor chain with ' > '"() {
+        given:
+        def rootNode = createMockNode(text: 'root')
+        def childNode = createMockNode(text: 'child', parent: rootNode)
+        def grandchildNode = createMockNode(text: 'grandchild', parent: childNode)
+
+        expect:
+        Utils.nodePathText(grandchildNode) == 'root > child > grandchild'
     }
 
     def "updateNextSteps clears existing children before adding new ones"() {

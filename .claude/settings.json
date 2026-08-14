@@ -1,5 +1,38 @@
 {
   "worktree": {
     "baseRef": "head"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gradle:*)",
+      "Bash(bash tools/check-conventions.sh)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; [ -z \"$f\" ] && exit 0; case \"$f\" in *scripts/*.groovy|*lib/*.groovy|*test/*.groovy|*gradle/packageAddon.gradle) root=$(cd \"$(dirname \"$f\")\" && git rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -x \"$root/tools/check-conventions.sh\" ] && bash \"$root/tools/check-conventions.sh\" ;; esac; }",
+            "statusMessage": "Checking CLAUDE.md conventions..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; case \"$cmd\" in *\"git commit\"*) if gradle check >&2; then exit 0; else printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"gradle check failed; see stderr above for the gradle output and fix the violations before committing.\"}}'; fi ;; esac; }",
+            "statusMessage": "Running gradle check before commit...",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
   }
 }

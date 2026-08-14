@@ -7,6 +7,9 @@ import javax.swing.SwingUtilities
 
 @Field private static final NEXT_STEPS_HEADING = '### Next Steps'
 @Field private static final MAX_NEXT_STEPS = 3
+// "* " / "- " (2 chars) plus at least 2 more, so a marker with no more than a
+// single trailing character (e.g. "* x") isn't treated as a real list item.
+@Field private static final MIN_LIST_ITEM_LENGTH = 3
 @Field private static final CONFIG_NODE_NAME = 'config'
 @Field private static final DOC_DIR_PATH_KEYS = ['docDirPath', 'pageDirPath']
 @Field private static final LAST_UPDATED_KEY = 'nextStepsUpdatedAt'
@@ -274,6 +277,21 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
 }
 
 /**
+ * Builds a human-readable "root > ... > text" path for a node, walking up
+ * through getParent(). Used by Search.groovy to show a result's position in
+ * the map without requiring it to be selected first.
+ */
+def static nodePathText(node) {
+    def parts = []
+    def current = node
+    while (current != null) {
+        parts.add(0, current.text)
+        current = current.getParent()
+    }
+    return parts.join(' > ')
+}
+
+/**
  * Opens a file or directory in the OS's default application.
  *
  * A thin wrapper over java.awt.Desktop, kept here rather than called inline from
@@ -411,5 +429,5 @@ private static void applyNextSteps(node, List<String> lines) {
 }
 
 private static boolean isListItem(String line) {
-    return (line.startsWith('* ') || line.startsWith('- ')) && line.length() > 3
+    return (line.startsWith('* ') || line.startsWith('- ')) && line.length() > MIN_LIST_ITEM_LENGTH
 }

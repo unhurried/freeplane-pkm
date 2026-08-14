@@ -1,0 +1,20 @@
+# Scripts listed here are exempt from tools/check-conventions.sh's "every
+# script has a test/<Name>Spec.groovy" rule. Each entry must be preceded by a
+# comment explaining why - this file is meant to make exceptions visible and
+# deliberate, not to make it easy to skip writing a spec.
+#
+# See the testing policy in CLAUDE.md for the underlying rationale.
+
+# Delegates entirely to org.freeplane.* internals, which aren't obtainable as
+# a project dependency (see the testing policy in CLAUDE.md).
+FoldOneLevel.groovy
+UnfoldOneLevel.groovy
+NewMapView.groovy
+
+# Builds and wires up a modeless Swing JDialog; the logic it calls into
+# (search, node-path building, opening files) lives in and is tested via
+# lib/Utils.groovy and lib/SearchIndex.groovy. Constructing a JDialog itself
+# throws HeadlessException in the headless test JVM (see build.gradle's
+# java.awt.headless system property), so the wiring itself can't be spec'd
+# the way the other scripts are.
+Search.groovy

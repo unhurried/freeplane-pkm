@@ -1,5 +1,6 @@
 plugins {
     id 'groovy'
+    id 'codenarc'
     id 'com.gradleup.shadow' version '8.3.5'
 }
 
@@ -28,6 +29,15 @@ sourceSets {
             srcDirs = ['test']
         }
     }
+}
+
+// Static analysis for lib/ and test/ only (via the sourceSets above) - not
+// scripts/, which relies on Freeplane-injected bindings (node, c, ui) that
+// look like undefined variables to a rule-based linter. See
+// config/codenarc/rules.groovy for the (deliberately small) rule set.
+codenarc {
+    toolVersion = '3.4.0'
+    configFile = file('config/codenarc/rules.groovy')
 }
 
 dependencies {
@@ -86,6 +96,12 @@ tasks.named('shadowJar') {
 
 test {
     useJUnitPlatform()
+    // ScriptSpec subclasses and ScriptSyntaxSpec read scripts/*.groovy directly off
+    // disk at run time (Freeplane runs them as files, not compiled classes - see
+    // CLAUDE.md), so Gradle's own up-to-date check - which otherwise only looks at
+    // the test task's compiled classes/classpath - needs telling that this task
+    // also depends on that directory's contents.
+    inputs.dir file('scripts')
     // updateNextSteps() marshals node updates onto the Swing EDT; running headless
     // lets that AWT event queue start on machines/CI runners without a display.
     systemProperty 'java.awt.headless', 'true'
@@ -116,4 +132,21 @@ test {
             throw new GradleException("Tests were skipped instead of run: ${skippedTests.join(', ')}")
         }
     }
+}
+
+// Runs tools/check-conventions.sh - the machine-checkable half of CLAUDE.md's
+// conventions (script/spec/addonScriptDefs sync, no direct Desktop use in
+// scripts/, no silently skipped tests, Java version sync). Kept as a plain
+// Exec (no JVM, no declared inputs/outputs) rather than a Spock spec so it
+// stays fast enough to also run from the PostToolUse hook in
+// .claude/settings.json on every scripts/lib/test edit, not just at `gradle
+// check` time.
+tasks.register('checkConventions', Exec) {
+    group = 'verification'
+    description = "Runs tools/check-conventions.sh (the machine-readable half of CLAUDE.md)."
+    commandLine 'bash', 'tools/check-conventions.sh'
+}
+
+tasks.named('check') {
+    dependsOn 'checkConventions'
 }

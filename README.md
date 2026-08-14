@@ -38,8 +38,9 @@ Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a sea
 ### Build and Test
 
 ```bash
-gradle build   # compile + test
+gradle build   # compile + check
 gradle test    # tests only
+gradle check   # tests + script syntax check + convention checks (tools/check-conventions.sh)
 ```
 
 ### Packaging as a Freeplane Add-on

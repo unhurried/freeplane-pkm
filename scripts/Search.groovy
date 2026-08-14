@@ -11,7 +11,6 @@ import javax.swing.JTextField
 import javax.swing.SwingUtilities
 import javax.swing.table.DefaultTableModel
 import java.awt.BorderLayout
-import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Frame
@@ -23,7 +22,7 @@ import java.awt.event.MouseEvent
 // A dedicated Swing search dialog for the document directory: full-text,
 // case-insensitive, AND-of-keywords search across both file content and file
 // name (see SearchIndex.groovy). Each result can either be opened directly
-// via Desktop.open(), or - when it corresponds to a page/directory node
+// via Utils.openInDesktop(), or - when it corresponds to a page/directory node
 // somewhere in the map - have that node selected and centered instead, so a
 // search result can be used as a shortcut back into the map's own structure.
 
@@ -59,18 +58,6 @@ table.columnModel.getColumn(0).preferredWidth = 200
 table.columnModel.getColumn(1).preferredWidth = 180
 table.columnModel.getColumn(2).preferredWidth = 320
 
-// Builds "root > ... > text" for a node's ancestor chain, so the Node column
-// shows a result's position in the map without requiring a selection first.
-def nodePathText = { targetNode ->
-    def parts = []
-    def current = targetNode
-    while (current != null) {
-        parts.add(0, current.text)
-        current = current.getParent()
-    }
-    return parts.join(' > ')
-}
-
 def updateActionButtons = {
     def viewRow = table.selectedRow
     def hasSelection = viewRow >= 0
@@ -89,7 +76,7 @@ def showHits = { List hits ->
     tableModel.rowCount = 0
     hits.eachWithIndex { hit, i ->
         def targetNode = currentNodes[i]
-        tableModel.addRow([hit.relativePath, targetNode ? nodePathText(targetNode) : '', hit.snippet] as Object[])
+        tableModel.addRow([hit.relativePath, targetNode ? Utils.nodePathText(targetNode) : '', hit.snippet] as Object[])
     }
     statusLabel.text = hits.isEmpty() ? 'No results' : "${hits.size()} result(s)"
     updateActionButtons()
@@ -130,7 +117,7 @@ def openSelectedHit = {
         statusLabel.text = "file no longer exists: ${hit.relativePath}"
         return
     }
-    Desktop.getDesktop().open(hit.file)
+    Utils.openInDesktop(hit.file)
 }
 
 def selectHitNode = {
@@ -145,7 +132,7 @@ def selectHitNode = {
     try {
         c.select(targetNode)
         c.centerOnNode(targetNode)
-        statusLabel.text = "selected: ${nodePathText(targetNode)}"
+        statusLabel.text = "selected: ${Utils.nodePathText(targetNode)}"
     } catch (Exception e) {
         statusLabel.text = "failed to select node: ${e.message}"
     }

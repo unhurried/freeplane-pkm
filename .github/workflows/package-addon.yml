@@ -2,7 +2,7 @@ name: Package Add-on
 
 on:
   push:
-    branches: [master, feature/*]
+    branches: [main, feature/*, fix/*, chore/*]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -25,8 +25,8 @@ jobs:
         with:
           gradle-version: '9.6.1'
 
-      - name: Run tests
-        run: gradle test
+      - name: Run checks
+        run: gradle check
 
       - name: Package add-on
         run: |

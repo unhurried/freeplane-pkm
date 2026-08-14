@@ -11,7 +11,8 @@ Groovy scripts that build a personal knowledge management (PKM) system on top of
 ```bash
 gradle test                      # all tests
 gradle test --tests UtilsSpec    # a single test class
-gradle build                     # compile + test
+gradle check                     # tests + script syntax check + tools/check-conventions.sh
+gradle build                     # compile + check
 gradle packageAddon              # produces build/addon/freeplane-pkm-<version>.addon.mm
 gradle packageAddon -PaddonVersion=v1.0.0
 ```
@@ -27,7 +28,7 @@ Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync w
 
 ## Testing policy
 
-- Everything in `lib/` is tested, and so is every script that carries logic of its own. Out of scope: scripts that only delegate to Freeplane internals (`FoldOneLevel`, `UnfoldOneLevel`, `NewMapView`, `scripts/init/init.groovy`) — they `import org.freeplane.*`, which isn't obtainable as a dependency. **Adding a script means adding its spec.**
+- Everything in `lib/` is tested, and so is every script that carries logic of its own. Out of scope: scripts that only delegate to Freeplane internals (`FoldOneLevel`, `UnfoldOneLevel`, `NewMapView`, `scripts/init/init.groovy`) — they `import org.freeplane.*`, which isn't obtainable as a dependency — and `Search.groovy`, which only wires up a Swing `JDialog` (`HeadlessException` in the test JVM); the logic it calls into lives in and is tested via `Utils`/`SearchIndex`. **Adding a script means adding its spec.** Both categories of exception are enforced, not just documented: `tools/check-conventions.sh` requires every `scripts/*.groovy` file to have either a `test/<Name>Spec.groovy` or a reasoned entry in `tools/spec-exempt.txt` — see the `add-script` skill for the full checklist when adding/removing/renaming a script.
 - Script specs extend `test/ScriptSpec.groovy`, which runs the real script file through a `GroovyShell` with fake `node`/`c`/`ui` bindings. Dialog answers are scripted (`inputAnswers`, `confirmAnswer`), and what the script did is recorded (`errorMessages`, `openedInDesktop`, `selectedNodes`, `filterCalls`).
 - Extend `FakeNode` (not an `Expando`) when a script starts using more of Freeplane's node API. Node fakes form a parent/child cycle and `Expando.toString()` recurses into it, so any failure message mentioning one overflows the stack, kills Gradle's JUnit listener mid-report, and gets recorded as a *skipped* test in a green build. `gradle test` therefore fails if any test is skipped.
 - Side effects on the outside world belong in `lib/Utils.groovy` (e.g. `Utils.openInDesktop`) rather than inline in a script, so specs can replace them: `java.awt.Desktop` is unusable in a headless test JVM.
@@ -42,3 +43,13 @@ Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync w
 - Node mutations must happen on the Swing EDT (`SwingUtilities.invokeLater`); file I/O is moved off it.
 - `scripts/init/init.groovy` runs at Freeplane startup and refreshes Next Steps and the search index on map changes. Init scripts run with the *global* scripting permissions, not the add-on's per-script ones, so it invokes the update through `ScriptingEngine.executeScript` with read and write permission granted explicitly.
 - The full-text search index lives at `<docDir>/.search-index/` (a Lucene index plus a small file tracking each indexed file's last-modified time, for incremental updates). `SearchIndex.updateIndex()` skips its own directory (and any other dot-directory) when scanning, and `FindUnlinked.groovy` explicitly excludes it too, so it's never reported as an unlinked directory. A schema version is also stored there (`index.version`); bump `SearchIndex.INDEX_SCHEMA_VERSION` whenever the analyzer or field configuration changes in a way that makes old and new tokens incompatible, and `updateIndex()` transparently does a full rebuild (dropping and re-extracting every file) on the next run.
+
+## Definition of done
+
+A change touching `scripts/`, `lib/`, or `test/` isn't finished until `gradle check` passes. That single command covers everything above:
+
+- the Spock suite (`test/*.groovy`)
+- `test/ScriptSyntaxSpec.groovy`, which parses every `scripts/*.groovy` file to catch syntax errors that would otherwise ship unnoticed (`gradle/packageAddon.gradle` embeds scripts as plain text, never compiling them)
+- `tools/check-conventions.sh` (wired in as the `checkConventions` task), which is the machine-checkable half of this file: script↔spec sync, script↔`addonScriptDefs` sync, no direct `java.awt.Desktop` use in `scripts/`, no silently skipped tests, and the Java-version sync mentioned above
+
+Its failures are not advisory — a violation it reports is a real gap, not a style nit to weigh. If a script genuinely can't have a spec, say so in `tools/spec-exempt.txt` with a reason rather than leaving it silently uncovered (see the `add-script` skill). The same check also runs from a `PostToolUse` hook right after editing `scripts/`, `lib/`, or `test/`, and `gradle check` itself gates `git commit` via a `PreToolUse` hook (see `.claude/settings.json`).
