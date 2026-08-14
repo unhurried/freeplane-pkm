@@ -19,7 +19,7 @@ import java.nio.file.Path
  * show or open is recorded (errorMessages, openedInDesktop) for assertions.
  *
  * Scripts that only delegate to Freeplane internals (FoldOneLevel,
- * UnfoldOneLevel, NewMapView, init/init.groovy) import org.freeplane.* classes
+ * UnfoldOneLevel, init/init.groovy) import org.freeplane.* classes
  * that aren't available as a dependency, and are therefore out of scope here.
  */
 abstract class ScriptSpec extends Specification {
