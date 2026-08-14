@@ -9,7 +9,6 @@
 # a project dependency (see the testing policy in CLAUDE.md).
 FoldOneLevel.groovy
 UnfoldOneLevel.groovy
-NewMapView.groovy
 
 # Builds and wires up a modeless Swing JDialog; the logic it calls into
 # (search, node-path building, opening files) lives in and is tested via

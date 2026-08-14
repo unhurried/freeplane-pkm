@@ -12,7 +12,7 @@ import spock.lang.Unroll
  * Stops at Phases.CONVERSION (parsing + AST building), one phase short of
  * name resolution, so scripts can be checked here even though they reference
  * bindings Freeplane injects at runtime (node, c, ui) and, for
- * FoldOneLevel/UnfoldOneLevel/NewMapView/init.groovy, import org.freeplane.*
+ * FoldOneLevel/UnfoldOneLevel/init.groovy, import org.freeplane.*
  * classes that aren't available as a project dependency (see the testing
  * policy in CLAUDE.md) - CONVERSION doesn't try to resolve either.
  */

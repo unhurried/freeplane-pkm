@@ -27,7 +27,7 @@ def addonFreeplaneVersionFrom = 'v1.11.1'
 
 // Menu order, titles, execution modes and keyboard shortcuts.
 def addonScriptDefs = [
-    [file: 'NewMapView.groovy',              title: 'New Map View',               mode: 'on_single_node',   shortcut: 'F1',  exec: false],
+    [file: 'Open.groovy',                    title: 'Open',                       mode: 'on_single_node',   shortcut: 'F1',  exec: true],
     [file: 'Edit.groovy',                    title: 'Edit',                       mode: 'on_single_node',   shortcut: 'F2',  exec: false],
     [file: 'FoldOneLevel.groovy',            title: 'Fold One Level',             mode: 'on_single_node',   shortcut: 'F3',  exec: false],
     [file: 'UnfoldOneLevel.groovy',          title: 'Unfold One Level',           mode: 'on_single_node',   shortcut: 'F4',  exec: false],
