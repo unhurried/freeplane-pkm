@@ -7,7 +7,7 @@
 # open - it stops catching things instead of complaining - so they get the
 # same static analysis lib/ and test/ get from CodeNarc.
 #
-# shellcheck isn't a build dependency: when it isn't installed the check
+# Note: shellcheck isn't a build dependency; when it isn't installed the check
 # reports that and passes, so a local `gradle check` still runs everywhere.
 # CI's ubuntu-latest image ships it, so it is effectively always enforced
 # there.
