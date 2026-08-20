@@ -93,4 +93,18 @@ class FilterSpec extends ScriptSpec {
         lastPredicate().call(matching)
         !lastPredicate().call(other)
     }
+
+    def "an uppercase keyword still matches a lowercase node text"() {
+        given:
+        def matching = addChild(rootNode, text: 'WSL上のUbuntuを22から24にアップデートする')
+        def other = addChild(rootNode, text: 'meeting notes')
+        inputAnswers << 'WSL'
+
+        when:
+        runScript('Filter.groovy', rootNode)
+
+        then:
+        lastPredicate().call(matching)
+        !lastPredicate().call(other)
+    }
 }

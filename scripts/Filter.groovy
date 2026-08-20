@@ -35,5 +35,6 @@ if (keyword == null || keyword.isEmpty()) {
         return !today.isBefore(dueDate)
     }
 } else {
-    node.map.filter(true, true) { it.text.toLowerCase().contains(keyword) }
+    def lowerKeyword = keyword.toLowerCase()
+    node.map.filter(true, true) { it.text.toLowerCase().contains(lowerKeyword) }
 }
