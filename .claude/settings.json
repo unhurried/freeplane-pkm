@@ -5,17 +5,27 @@
   "permissions": {
     "allow": [
       "Bash(gradle:*)",
-      "Bash(bash tools/check-conventions.sh)"
+      "Bash(bash tools/check-conventions.sh)",
+      "Bash(bash tools/check-shell.sh)",
+      "Bash(bash tools/hooks/:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
     ]
   },
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; [ -z \"$f\" ] && exit 0; case \"$f\" in *scripts/*.groovy|*lib/*.groovy|*test/*.groovy|*gradle/packageAddon.gradle) root=$(cd \"$(dirname \"$f\")\" && git rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -x \"$root/tools/check-conventions.sh\" ] && bash \"$root/tools/check-conventions.sh\" ;; esac; }",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/hooks/post-edit-check.sh\"",
             "statusMessage": "Checking CLAUDE.md conventions..."
           }
         ]
@@ -27,9 +37,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; case \"$cmd\" in *\"git commit\"*) if gradle check >&2; then exit 0; else printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"gradle check failed; see stderr above for the gradle output and fix the violations before committing.\"}}'; fi ;; esac; }",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/hooks/pre-commit-gate.sh\"",
             "statusMessage": "Running gradle check before commit...",
-            "timeout": 120
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/hooks/stop-check.sh\"",
+            "statusMessage": "Re-checking CLAUDE.md conventions...",
+            "timeout": 60
           }
         ]
       }

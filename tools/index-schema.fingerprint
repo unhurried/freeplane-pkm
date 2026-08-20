@@ -1,0 +1,7 @@
+# Pins the schema-affecting region of lib/SearchIndex.groovy (the part between the
+# schema-region markers: analyzer construction and indexed field setup) to the
+# INDEX_SCHEMA_VERSION it belongs to. Checked by #10 in
+# tools/check-conventions.sh. Do not edit by hand: bump INDEX_SCHEMA_VERSION,
+# then run 'bash tools/check-conventions.sh --update-index-fingerprint'.
+version=1
+sha256=3f784c5546740a44d634e93b486c7d833a8b47f4684b2fa11281925fcee6ba95

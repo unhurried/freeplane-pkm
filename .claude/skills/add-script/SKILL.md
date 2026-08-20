@@ -32,14 +32,19 @@ build the moment any one of them is missing:
    `HeadlessException` in the test JVM, or it imports `org.freeplane.*`
    internals that aren't obtainable as a dependency) - and even then, add it
    to `tools/spec-exempt.txt` with a reason comment rather than leaving it
-   silently uncovered.
+   silently uncovered. Entries there are repo-relative paths
+   (`scripts/Search.groovy`, `lib/SearchHit.groovy`), since the same rule
+   covers `lib/*.groovy`.
 3. **`gradle/packageAddon.gradle`**'s `addonScriptDefs` list - the menu
    title, execution mode, keyboard shortcut, and per-script permissions.
    Removing a script also means removing its shortcut/menu order entry here;
    renaming means updating `file:`/`title:` together, not adding a new entry.
 
-Also check `README.md`'s shortcut table/feature list if the change affects
-what a user sees in the Tools → Scripts menu.
+If the change touches a menu title or shortcut, regenerate `README.md`'s
+shortcut table with `bash tools/check-conventions.sh --update-readme-shortcuts`
+(it is generated from `addonScriptDefs` and checked against it); update the
+feature list by hand if the change affects what a user sees in the
+Tools → Scripts menu.
 
 ## Verifying the change
 
@@ -48,5 +53,6 @@ Run `gradle check` (not just `gradle test`) - it wires together the tests,
 syntax errors that a plain-text-embedding `packageAddon` build would
 otherwise ship unnoticed), and `tools/check-conventions.sh` (the script↔spec
 and script↔`addonScriptDefs` sync checks, and the no-direct-`Desktop` rule
-above). All three must pass; a failure from `check-conventions.sh` names the
-exact file and what to do about it.
+above, plus the menu-shortcut, README-table and `addonZipEntries` rules).
+All of it must pass; a failure from `check-conventions.sh` names the exact
+file and what to do about it.

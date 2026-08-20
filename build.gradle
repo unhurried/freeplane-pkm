@@ -147,6 +147,20 @@ tasks.register('checkConventions', Exec) {
     commandLine 'bash', 'tools/check-conventions.sh'
 }
 
+// Runs tools/check-shell.sh - shellcheck over tools/*.sh and the Claude Code
+// hook bodies in tools/hooks/. Those scripts gate edits, commits and `gradle
+// check` itself, and a bug in one of them fails open (it stops catching
+// things rather than complaining), so they get the same kind of static
+// analysis CodeNarc gives lib/ and test/. The wrapper passes with a notice
+// when shellcheck isn't installed, so a local build never needs it; CI's
+// runner image ships it.
+tasks.register('checkShell', Exec) {
+    group = 'verification'
+    description = "Runs shellcheck over tools/*.sh and tools/hooks/*.sh (skipped when shellcheck is absent)."
+    commandLine 'bash', 'tools/check-shell.sh'
+}
+
 tasks.named('check') {
     dependsOn 'checkConventions'
+    dependsOn 'checkShell'
 }
