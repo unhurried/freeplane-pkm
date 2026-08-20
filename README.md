@@ -15,7 +15,24 @@ Freeplane PKM is a project for building a personal knowledge management (PKM) sy
 2. In Freeplane, select Tools → Add-ons → Search and Install, choose the downloaded file, and install it.
 3. Restart Freeplane.
 
-The scripts are available under Tools → Scripts → Freeplane PKM, with keyboard shortcuts (F1–F10, F12) assigned automatically.
+The scripts are available under Tools → Scripts → Freeplane PKM, with the keyboard shortcuts below assigned automatically.
+
+<!-- shortcuts:begin (generated from addonScriptDefs in gradle/packageAddon.gradle) -->
+| Shortcut | Menu entry |
+| --- | --- |
+| F1 | Open |
+| F2 | Edit |
+| F3 | Fold One Level |
+| F4 | Unfold One Level |
+| F5 | Filter |
+| F6 | Search |
+| F7 | Toggle Checkmark |
+| F8 | Add to ToDo |
+| F9 | New Page |
+| F10 | New Directory |
+| F11 | Delete |
+| F12 | Update Next Steps and Search Index |
+<!-- shortcuts:end -->
 
 ## Full-Text Document Search
 
@@ -46,7 +63,7 @@ gradle check   # tests + script syntax check + convention checks (tools/check-co
 ### Packaging as a Freeplane Add-on
 
 ```bash
-gradle packageAddon                        # uses addonDefaultVersion from gradle.properties
+gradle packageAddon                        # uses the version from gradle.properties
 gradle packageAddon -PaddonVersion=v1.0.0  # explicit version
 ```
 

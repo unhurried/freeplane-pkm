@@ -61,9 +61,11 @@ import org.apache.poi.extractor.ExtractorFactory
 // wrong (or zero) results after an add-on update.
 @Field private static final int INDEX_SCHEMA_VERSION = 1
 
+// schema-region:begin - indexed field names
 @Field private static final String FIELD_PATH = 'path'
 @Field private static final String FIELD_FILENAME = 'filename'
 @Field private static final String FIELD_CONTENT = 'content'
+// schema-region:end
 // Filename matches are boosted relative to content matches, so a file whose
 // name matches a keyword tends to rank above a file that merely mentions it.
 @Field private static final Map<String, Float> SEARCH_FIELD_BOOSTS = [(FIELD_FILENAME): 2.0f, (FIELD_CONTENT): 1.0f]
@@ -82,9 +84,11 @@ import org.apache.poi.extractor.ExtractorFactory
 // newJapaneseAnalyzer): split a run of letters/digits on case change
 // ("QuarterlyReport" -> "Quarterly"/"Report") and on letter/digit boundaries
 // ("Report2024" -> "Report"/"2024"), emitting both the word and number parts.
+// schema-region:begin - filename tokenization flags
 @Field private static final int FILENAME_SPLIT_FLAGS =
         WordDelimiterGraphFilter.GENERATE_WORD_PARTS | WordDelimiterGraphFilter.GENERATE_NUMBER_PARTS |
         WordDelimiterGraphFilter.SPLIT_ON_CASE_CHANGE | WordDelimiterGraphFilter.SPLIT_ON_NUMERICS
+// schema-region:end
 
 /**
  * Extracts searchable text from a single file, based on its extension:
@@ -180,9 +184,11 @@ def static void updateIndex(File docDir) {
                 if (knownMTimes[relPath] == mtime) return
 
                 def doc = new Document()
+                // schema-region:begin - indexed fields and their types
                 doc.add(new StringField(FIELD_PATH, relPath, Store.YES))
                 doc.add(new TextField(FIELD_FILENAME, file.name, Store.YES))
                 doc.add(new TextField(FIELD_CONTENT, extractText(file), Store.YES))
+                // schema-region:end
                 writer.updateDocument(new Term(FIELD_PATH, relPath), doc)
                 knownMTimes[relPath] = mtime
             }
@@ -235,6 +241,7 @@ def static List<SearchHit> search(File docDir, String queryText, int maxResults 
 
 // --- Private helper methods ---
 
+// schema-region:begin - analyzer construction
 private static newAnalyzer() {
     // JapaneseTokenizer (Kuromoji) does real morphological analysis - using its
     // bundled IPADIC dictionary to split text into actual words and normalize
@@ -288,6 +295,7 @@ private static Analyzer newJapaneseAnalyzer(boolean forFilename) {
         }
     }
 }
+// schema-region:end
 
 private static String extensionOf(String name) {
     def dot = name.lastIndexOf('.')
