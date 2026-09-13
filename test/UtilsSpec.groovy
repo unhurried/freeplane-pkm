@@ -577,6 +577,22 @@ class UtilsSpec extends Specification {
         Utils.findNodeForFile(nodesByFile, orphanFile, docDir) == null
     }
 
+    def "findNodeForFile resolves a hit reached through a non-canonical path"() {
+        given: 'the node links the page directly, while the hit names the same file via a redundant "." segment'
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Page.md')
+        pageFile.createNewFile()
+        def pageNode = createMockNode(linkFile: pageFile)
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: [pageNode]))
+        def sameFileOtherPath = new File(docDir.path + '/./Page.md')
+
+        expect: 'both spellings still canonicalize to the same file, cached or not'
+        sameFileOtherPath.path != pageFile.path
+        Utils.findNodeForFile(nodesByFile, sameFileOtherPath, docDir) == pageNode
+        Utils.findNodeForFile(nodesByFile, pageFile, docDir) == pageNode
+    }
+
     // --- Tests for nodePathText ---
 
     def "nodePathText returns the node's own text when it has no parent"() {
