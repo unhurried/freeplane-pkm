@@ -7,15 +7,24 @@
 		"dockerfile": "Dockerfile"
 	},
 	"features": {
-		"ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {
-			"version": "latest",
+		// The JDK is installed by the official java feature instead of by gradle-sdkman:
+		// gradle-sdkman hardcodes java:1.2.1, whose SDKMAN version regex only accepts
+		// identifiers like "17.0.15-ms" and rejects the "+<build>" ones SDKMAN now
+		// publishes for every Microsoft JDK (17.0.20+1-ms), so the install failed with
+		// "Version 17 not found. Available versions:" (empty). java:1 (>= 1.8.x) is fixed.
+		"ghcr.io/devcontainers/features/java:1": {
 			// Pinned to match the Java version used by the Package Add-on CI workflow
 			// (.github/workflows/package-addon.yml) and supported by Freeplane's bundled
 			// JRE. "latest" previously installed JDK 25, which compiles to class file
 			// version 69 -- newer than Freeplane's runtime can load (max 65, Java 21),
 			// causing UnsupportedClassVersionError when running a locally built add-on.
-			"jdkVersion": "17",
+			"version": "17",
 			"jdkDistro": "ms"
+		},
+		"ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {
+			"version": "latest",
+			// The JDK comes from the java feature above.
+			"jdkVersion": "none"
 		},
 		"ghcr.io/devcontainers/features/copilot-cli:1": {
 			"version": "latest"
