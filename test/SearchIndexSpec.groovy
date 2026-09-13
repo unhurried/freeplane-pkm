@@ -20,6 +20,13 @@ class SearchIndexSpec extends Specification {
         docDir.mkdirs()
     }
 
+    def cleanup() {
+        // The index reader is cached for the lifetime of the class (see
+        // SearchIndex), so it has to be released before @TempDir deletes the
+        // index files it is holding open.
+        SearchIndex.releaseCachedReader()
+    }
+
     // --- Helpers to create fixture files of each supported format ---
 
     private File textFile(String name, String content) {
@@ -360,6 +367,73 @@ class SearchIndexSpec extends Specification {
 
         expect:
         SearchIndex.search(docDir, SearchIndex.INDEX_DIR_NAME) == []
+    }
+
+    def "search sees index updates made after an earlier search"() {
+        given: 'a page that has already been searched for once, so a reader is cached'
+        def file = textFile('Alpha.md', 'first version')
+        file.setLastModified(1000L)
+        SearchIndex.updateIndex(docDir)
+        assert SearchIndex.search(docDir, 'first').size() == 1
+
+        when:
+        file.text = 'second version'
+        file.setLastModified(2000L)
+        SearchIndex.updateIndex(docDir)
+
+        then: 'the search reflects the new commit, not the view it had already opened'
+        SearchIndex.search(docDir, 'first') == []
+        SearchIndex.search(docDir, 'second').size() == 1
+    }
+
+    def "search answers from the document directory it is given, not the one searched before"() {
+        given:
+        textFile('Alpha.md', 'mountains')
+        SearchIndex.updateIndex(docDir)
+        def otherDocDir = tempDir.resolve('other-docs').toFile()
+        otherDocDir.mkdirs()
+        new File(otherDocDir, 'Beta.md').text = 'rivers'
+        SearchIndex.updateIndex(otherDocDir)
+
+        expect: 'switching back and forth reopens the right index every time'
+        SearchIndex.search(docDir, 'mountains').size() == 1
+        SearchIndex.search(otherDocDir, 'rivers').size() == 1
+        SearchIndex.search(otherDocDir, 'mountains') == []
+        SearchIndex.search(docDir, 'rivers') == []
+    }
+
+    def "warmUp is safe before the index has ever been built"() {
+        when:
+        SearchIndex.warmUp(docDir)
+
+        then:
+        noExceptionThrown()
+        SearchIndex.search(docDir, 'anything') == []
+    }
+
+    def "warmUp leaves the index searchable"() {
+        given:
+        textFile('Alpha.md', '機械学習の勉強をした。')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        SearchIndex.warmUp(docDir)
+
+        then:
+        SearchIndex.search(docDir, '機械学習').size() == 1
+    }
+
+    def "releaseCachedReader does not stop later searches"() {
+        given:
+        textFile('Alpha.md', 'mountains')
+        SearchIndex.updateIndex(docDir)
+        assert SearchIndex.search(docDir, 'mountains').size() == 1
+
+        when:
+        SearchIndex.releaseCachedReader()
+
+        then:
+        SearchIndex.search(docDir, 'mountains').size() == 1
     }
 
     def "updateIndex is safe to call on an empty document directory"() {

@@ -105,6 +105,21 @@ test {
     // updateNextSteps() marshals node updates onto the Swing EDT; running headless
     // lets that AWT event queue start on machines/CI runners without a display.
     systemProperty 'java.awt.headless', 'true'
+    // SearchIndexSpec creates fixtures with Japanese file names, and a JVM whose
+    // filename encoding (sun.jnu.encoding, taken from the OS locale at startup -
+    // a system property can't change it afterwards) isn't UTF-8 writes them to
+    // disk as '?' instead, so the file-name search tests fail for a reason that
+    // has nothing to do with the code. Containers and CI images commonly run
+    // under the C/POSIX locale, so the test JVM is given a UTF-8 one - but only
+    // where that is an improvement: a platform already on UTF-8 is left alone,
+    // and so is Windows, whose filename encoding is a code page that this
+    // environment variable wouldn't change anyway.
+    def jnuEncoding = System.getProperty('sun.jnu.encoding') ?: ''
+    def onWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    if (!onWindows && !jnuEncoding.toUpperCase().contains('UTF')) {
+        environment 'LC_ALL', 'C.UTF-8'
+    }
+
     // The JVM hardcodes java.io.tmpdir to /tmp and ignores $TMPDIR, so @TempDir-based
     // tests fail wherever /tmp itself isn't writable (e.g. Claude Code's sandboxed
     // shell, which only allows writes under $TMPDIR). Forward it through when set.

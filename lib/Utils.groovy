@@ -1,4 +1,5 @@
 import groovy.transform.Field
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
@@ -19,6 +20,22 @@ import javax.swing.SwingUtilities
 // Held from the start of the background scan until its results have been
 // applied on the EDT.
 @Field private static final AtomicBoolean NEXT_STEPS_SCAN_IN_PROGRESS = new AtomicBoolean(false)
+
+// Memoizes File.getCanonicalFile(), which is a filesystem call per invocation
+// (the JDK's own canonicalization cache is off by default). Resolving search
+// hits to nodes canonicalizes every linked file in the map plus every hit and
+// its parent directories, so without this a search on a large map means
+// thousands of stat calls - every single time.
+//
+// Keyed by the file's path, and used for both sides of every comparison, so a
+// cached answer can only ever be "wrong" in the sense of being consistent with
+// itself: an entry goes stale only if a symlink along the path is retargeted
+// while Freeplane is running, and both the linked file and the search hit then
+// still resolve the same way.
+@Field private static final Map<String, File> CANONICAL_FILE_CACHE = new ConcurrentHashMap<String, File>()
+// Cleared wholesale rather than evicted entry by entry: the cache is a
+// throwaway speed-up, and a map big enough to reach this has bigger problems.
+@Field private static final int MAX_CANONICAL_FILE_CACHE_ENTRIES = 20000
 
 /**
  * Loads the document directory path from the mind map's config node.
@@ -254,8 +271,8 @@ def static Map<File, Object> collectNodesByLinkedFile(node) {
  * directories, or (for an assets file) its page.
  */
 def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir) {
-    def canonicalDocDir = docDir.canonicalFile
-    def current = file.canonicalFile
+    def canonicalDocDir = canonicalFileOf(docDir)
+    def current = canonicalFileOf(file)
     def hit = nodesByFile[current]
     if (hit) return hit
 
@@ -266,7 +283,7 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
 
         if (dir.name.endsWith('.assets')) {
             def pageFile = new File(dir.parentFile, dir.name.replaceAll(/\.assets$/, '') + '.md')
-            hit = nodesByFile[pageFile.canonicalFile]
+            hit = nodesByFile[canonicalFileOf(pageFile)]
             if (hit) return hit
         }
 
@@ -305,6 +322,22 @@ def static openInDesktop(File file) {
 
 // --- Private helper methods ---
 
+/**
+ * File.getCanonicalFile(), memoized per path - see CANONICAL_FILE_CACHE. A
+ * miss resolves the file as before and records the answer; reaching the
+ * cache's bound empties it first, so it never grows without limit and the
+ * result never depends on whether an entry happened to be cached.
+ */
+private static File canonicalFileOf(File file) {
+    def cached = CANONICAL_FILE_CACHE[file.path]
+    if (cached) return cached
+
+    def canonical = file.canonicalFile
+    if (CANONICAL_FILE_CACHE.size() >= MAX_CANONICAL_FILE_CACHE_ENTRIES) CANONICAL_FILE_CACHE.clear()
+    CANONICAL_FILE_CACHE[file.path] = canonical
+    return canonical
+}
+
 private static List collectNodes(node) {
     def nodes = []
     collectNodesRecursive(node, nodes)
@@ -320,7 +353,7 @@ private static void collectNodesRecursive(node, List nodes) {
 
 private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
     def linkedFile = getLinkedFile(node)
-    if (linkedFile) linkedFiles.add(linkedFile.canonicalFile)
+    if (linkedFile) linkedFiles.add(canonicalFileOf(linkedFile))
     for (child in node.children) {
         collectLinkedFilesRecursive(child, linkedFiles)
     }
@@ -328,10 +361,10 @@ private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
 
 private static void collectNodesByLinkedFileRecursive(node, Map direct, Map indirect) {
     if (node.link.file) {
-        direct[node.link.file.canonicalFile] = node
+        direct[canonicalFileOf(node.link.file)] = node
     } else {
         def linkedFile = getLinkedFile(node)
-        if (linkedFile) indirect[linkedFile.canonicalFile] = node
+        if (linkedFile) indirect[canonicalFileOf(linkedFile)] = node
     }
     for (child in node.children) {
         collectNodesByLinkedFileRecursive(child, direct, indirect)
