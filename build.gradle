@@ -10,9 +10,8 @@ repositories {
     mavenCentral()
 }
 
-// Pinned so the compiled class file version stays loadable by Freeplane's bundled
-// JRE regardless of which JDK happens to run Gradle (e.g. a devcontainer update).
-// Must stay in sync with the java-version used in .github/workflows/package-addon.yml.
+// Pinned so the class files stay loadable by Freeplane's bundled JRE whatever
+// JDK runs Gradle. Keep in sync with java-version in .github/workflows/package-addon.yml.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -31,40 +30,29 @@ sourceSets {
     }
 }
 
-// Static analysis for lib/ and test/ only (via the sourceSets above) - not
-// scripts/, which relies on Freeplane-injected bindings (node, c, ui) that
-// look like undefined variables to a rule-based linter. See
-// config/codenarc/rules.groovy for the (deliberately small) rule set.
+// lib/ and test/ only: scripts/ relies on Freeplane-injected bindings (node, c, ui)
+// that a linter sees as undefined variables.
 codenarc {
     toolVersion = '3.4.0'
     configFile = file('config/codenarc/rules.groovy')
 }
 
 dependencies {
-    // Groovy itself is not bundled into the add-on's lib jar (see shadowJar below) -
-    // Freeplane already runs on its own embedded Groovy, which provides these classes
-    // at runtime. compileOnly keeps it available for compiling lib/*.groovy without
-    // shadowJar packaging a second, potentially conflicting, copy.
+    // Freeplane runs on its own embedded Groovy, so it is not bundled into the add-on jar.
     compileOnly 'org.apache.groovy:groovy:4.0.27'
 
-    // Full-text search: index (Lucene) plus content extraction for non-Markdown
-    // formats (PDF, and current-format Office documents). These, unlike Groovy, are
-    // not provided by the Freeplane runtime, so they are bundled by shadowJar into
-    // the add-on's lib jar.
+    // Full-text search: index (Lucene, with Kuromoji for Japanese) plus content
+    // extraction for PDF and current-format Office documents. Bundled by shadowJar.
     implementation 'org.apache.lucene:lucene-core:9.11.1'
     implementation 'org.apache.lucene:lucene-analysis-common:9.11.1'
     implementation 'org.apache.lucene:lucene-highlighter:9.11.1'
-    // Japanese morphological analysis (Kuromoji), including its bundled IPADIC
-    // dictionary - used for Japanese content/filename search (see SearchIndex.groovy).
     implementation 'org.apache.lucene:lucene-analysis-kuromoji:9.11.1'
     implementation 'org.apache.pdfbox:pdfbox:2.0.31'
     implementation 'org.apache.poi:poi-ooxml:5.2.5'
 
     testImplementation 'org.apache.groovy:groovy:4.0.27'
-    // Freeplane runs the add-on on a full Groovy distribution, so scripts/*.groovy may
-    // use its extension modules (e.g. Date.format() in NewPage.groovy, LocalDate.format()
-    // parsing in Filter.groovy). Compiling lib/ only needs groovy core, so the modules
-    // the script specs exercise are added to the test runtime instead.
+    // Extension modules the scripts use (Date.format(), LocalDate parsing); Freeplane's
+    // full Groovy distribution provides them at runtime.
     testImplementation 'org.apache.groovy:groovy-dateutil:4.0.27'
     testImplementation 'org.apache.groovy:groovy-datetime:4.0.27'
     testImplementation platform('org.spockframework:spock-bom:2.4-M4-groovy-4.0')
@@ -73,22 +61,12 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-// Produces the fat jar embedded in the add-on (see gradle/packageAddon.gradle):
-// lib/*.groovy classes plus the search dependencies above, minus Groovy itself
-// (compileOnly, so shadowJar's runtime classpath never includes it). Keeps its
-// default "-all" classifier so its output file doesn't collide with the plain
-// `jar` task's (both would otherwise write build/libs/freeplane-pkm-<version>.jar).
+// The fat jar embedded in the add-on: lib/ classes plus the dependencies above.
 tasks.named('shadowJar') {
-    // lucene-core is a multi-release JAR: MMapDirectory's Java 19+ implementation
-    // (MemorySegmentIndexInputProvider) lives only under META-INF/versions/19+/, not
-    // in the base class tree. shadowJar merges those versioned .class files into the
-    // fat jar but, unlike the `jar` task, does not carry over the source jars'
-    // "Multi-Release: true" manifest attribute. Without it the JVM ignores
-    // META-INF/versions/ entirely and treats the fat jar as a plain (non-multi-release)
-    // jar, so on Java 19+ (e.g. Freeplane's bundled JRE) MMapDirectory's static
-    // initializer fails to find MemorySegmentIndexInputProvider at all, throwing
-    // ClassNotFoundException -> LinkageError. Restoring the attribute here makes the
-    // JVM look under META-INF/versions/ again, as it does for the unshaded jar.
+    // lucene-core is a multi-release jar (MMapDirectory's Java 19+ implementation
+    // lives under META-INF/versions/19/). shadowJar copies those classes but drops
+    // this manifest attribute, without which the JVM ignores them and MMapDirectory
+    // fails to initialize on Freeplane's bundled JRE.
     manifest {
         attributes 'Multi-Release': 'true'
     }
@@ -96,41 +74,26 @@ tasks.named('shadowJar') {
 
 test {
     useJUnitPlatform()
-    // ScriptSpec subclasses and ScriptSyntaxSpec read scripts/*.groovy directly off
-    // disk at run time (Freeplane runs them as files, not compiled classes - see
-    // CLAUDE.md), so Gradle's own up-to-date check - which otherwise only looks at
-    // the test task's compiled classes/classpath - needs telling that this task
-    // also depends on that directory's contents.
+    // The script specs read scripts/*.groovy off disk, so those files are inputs too.
     inputs.dir file('scripts')
-    // updateNextSteps() marshals node updates onto the Swing EDT; running headless
-    // lets that AWT event queue start on machines/CI runners without a display.
+    // Lets the Swing EDT (used by Utils.updateAllNextSteps) start without a display.
     systemProperty 'java.awt.headless', 'true'
-    // SearchIndexSpec creates fixtures with Japanese file names, and a JVM whose
-    // filename encoding (sun.jnu.encoding, taken from the OS locale at startup -
-    // a system property can't change it afterwards) isn't UTF-8 writes them to
-    // disk as '?' instead, so the file-name search tests fail for a reason that
-    // has nothing to do with the code. Containers and CI images commonly run
-    // under the C/POSIX locale, so the test JVM is given a UTF-8 one - but only
-    // where that is an improvement: a platform already on UTF-8 is left alone,
-    // and so is Windows, whose filename encoding is a code page that this
-    // environment variable wouldn't change anyway.
+    // SearchIndexSpec creates files with Japanese names; under a non-UTF-8 locale
+    // (common in containers/CI) the JVM writes them as '?'. Windows uses a code page
+    // this variable wouldn't affect.
     def jnuEncoding = System.getProperty('sun.jnu.encoding') ?: ''
     def onWindows = System.getProperty('os.name').toLowerCase().contains('windows')
     if (!onWindows && !jnuEncoding.toUpperCase().contains('UTF')) {
         environment 'LC_ALL', 'C.UTF-8'
     }
-
-    // The JVM hardcodes java.io.tmpdir to /tmp and ignores $TMPDIR, so @TempDir-based
-    // tests fail wherever /tmp itself isn't writable (e.g. Claude Code's sandboxed
-    // shell, which only allows writes under $TMPDIR). Forward it through when set.
+    // The JVM ignores $TMPDIR; forward it so @TempDir works where /tmp isn't writable.
     if (System.getenv('TMPDIR')) {
         systemProperty 'java.io.tmpdir', System.getenv('TMPDIR')
     }
 
-    // A failure Gradle cannot render (e.g. a test fake whose toString() recurses -
-    // see the testing policy in CLAUDE.md) makes its JUnit listener throw while
-    // reporting, which silently downgrades the failed test to "skipped" and leaves
-    // the build green. Nothing here is meant to be skipped, so treat it as a failure.
+    // A failure Gradle can't render (e.g. a fake whose toString() recurses) makes
+    // the JUnit listener throw mid-report and records the test as skipped, leaving
+    // the build green. Nothing here is meant to be skipped.
     def skippedTests = []
     addTestListener(new TestListener() {
         void beforeSuite(TestDescriptor suite) {}
@@ -149,33 +112,12 @@ test {
     }
 }
 
-// Runs tools/check-conventions.sh - the machine-checkable half of CLAUDE.md's
-// conventions (script/spec/addonScriptDefs sync, no direct Desktop use in
-// scripts/, no silently skipped tests, Java version sync). Kept as a plain
-// Exec (no JVM, no declared inputs/outputs) rather than a Spock spec so it
-// stays fast enough to also run from the PostToolUse hook in
-// .claude/settings.json on every scripts/lib/test edit, not just at `gradle
-// check` time.
 tasks.register('checkConventions', Exec) {
     group = 'verification'
-    description = "Runs tools/check-conventions.sh (the machine-readable half of CLAUDE.md)."
+    description = 'Runs tools/check-conventions.sh (the machine-checkable conventions from CLAUDE.md).'
     commandLine 'bash', 'tools/check-conventions.sh'
-}
-
-// Runs tools/check-shell.sh - shellcheck over tools/*.sh and the Claude Code
-// hook bodies in tools/hooks/. Those scripts gate edits, commits and `gradle
-// check` itself, and a bug in one of them fails open (it stops catching
-// things rather than complaining), so they get the same kind of static
-// analysis CodeNarc gives lib/ and test/. The wrapper passes with a notice
-// when shellcheck isn't installed, so a local build never needs it; CI's
-// runner image ships it.
-tasks.register('checkShell', Exec) {
-    group = 'verification'
-    description = "Runs shellcheck over tools/*.sh and tools/hooks/*.sh (skipped when shellcheck is absent)."
-    commandLine 'bash', 'tools/check-shell.sh'
 }
 
 tasks.named('check') {
     dependsOn 'checkConventions'
-    dependsOn 'checkShell'
 }

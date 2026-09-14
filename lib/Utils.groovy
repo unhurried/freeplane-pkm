@@ -1,34 +1,27 @@
 import groovy.transform.Field
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
 @Field static final DOC_TARGET_PAGE = 'page'
 @Field static final DOC_TARGET_DIRECTORY = 'directory'
 
-@Field private static final NEXT_STEPS_HEADING = '### Next Steps'
-@Field private static final MAX_NEXT_STEPS = 3
-// "* " / "- " (2 chars) plus at least 2 more, so a marker with no more than a
-// single trailing character (e.g. "* x") isn't treated as a real list item.
-@Field private static final MIN_LIST_ITEM_LENGTH = 3
-@Field private static final CONFIG_NODE_NAME = 'config'
-@Field private static final DOC_DIR_PATH_KEYS = ['docDirPath', 'pageDirPath']
-@Field private static final LAST_UPDATED_KEY = 'nextStepsUpdatedAt'
+@Field private static final String CONFIG_NODE_NAME = 'config'
+@Field private static final String DOC_DIR_PATH_KEY = 'docDirPath'
+@Field private static final String NEXT_STEPS_HEADING = '### Next Steps'
+@Field private static final int MAX_NEXT_STEPS = 3
+// "* " / "- " plus at least 2 more characters, so "* x" isn't a list item.
+@Field private static final int MIN_LIST_ITEM_LENGTH = 3
+// File system reserved characters, rejected in page and directory names.
+@Field private static final String INVALID_NAME_CHARS = '[\\\\/:*?"><|]'
+@Field private static final String BOM_CHAR = '\uFEFF'
 
-// Guards updateAllNextSteps() against overlapping scans (e.g. the periodic
-// listener firing again before a previous scan of a large map has finished).
-// Held from the start of the background scan until its results have been
-// applied on the EDT.
-@Field private static final AtomicBoolean NEXT_STEPS_SCAN_IN_PROGRESS = new AtomicBoolean(false)
+// --- Document directory and node <-> file mapping ---
 
-/**
- * Loads the document directory path from the mind map's config node.
- * Config structure: root > config > docDirPath > [path value]
- */
+/** The document directory from the map's config node: root > config > docDirPath > [path]. */
 def static loadDocDir(node) {
     def configNode = findChildByText(node.mindMap.root, CONFIG_NODE_NAME)
     if (!configNode) throw new RuntimeException('config node is missing.')
 
-    def docDirPath = loadDocDirPath(configNode)
+    def docDirPath = findChildByText(configNode, DOC_DIR_PATH_KEY)?.children?.getAt(0)?.plainText
     if (!docDirPath) throw new RuntimeException('docDirPath node is missing.')
 
     def docDir = new File(docDirPath)
@@ -37,9 +30,30 @@ def static loadDocDir(node) {
     return docDir
 }
 
-/**
- * Returns the file linked from the node (directly or via an intermediate node link).
- */
+def static File pageFile(File docDir, String name) {
+    return new File(docDir, name + '.md')
+}
+
+def static File assetsDir(File docDir, String name) {
+    return new File(docDir, name + '.assets')
+}
+
+def static boolean isValidName(String name) {
+    return !(name =~ INVALID_NAME_CHARS)
+}
+
+/** Reads a page as UTF-8, without the byte-order mark writePage() puts in front. */
+def static String readPage(File file) {
+    def text = file.getText('UTF-8')
+    return text.startsWith(BOM_CHAR) ? text.substring(1) : text
+}
+
+/** Writes a page as UTF-8 with a byte-order mark (what Markdown editors on Windows expect). */
+def static void writePage(File file, String text) {
+    file.setText(BOM_CHAR + text, 'UTF-8')
+}
+
+/** The file linked from the node, directly or via a linked node. */
 def static getLinkedFile(node) {
     if (node.link.node && node.link.node.link.file) {
         return node.link.node.link.file
@@ -48,131 +62,24 @@ def static getLinkedFile(node) {
 }
 
 /**
- * Determines whether the node represents a page (its link is the existing
- * file <docDir>/<text>.md) or a directory (the existing directory
- * <docDir>/<text>/). Returns DOC_TARGET_PAGE, DOC_TARGET_DIRECTORY, or null.
+ * DOC_TARGET_PAGE if the node links the existing file <docDir>/<text>.md,
+ * DOC_TARGET_DIRECTORY if it links the existing directory <docDir>/<text>/, else null.
  */
 def static getDocNodeType(node) {
     def linkedFile = getLinkedFile(node)
     if (!linkedFile) return null
 
     def docDir = loadDocDir(node)
-    if (linkedFile == pageFileOf(node, docDir) && linkedFile.isFile()) return DOC_TARGET_PAGE
+    if (linkedFile == pageFile(docDir, node.text) && linkedFile.isFile()) return DOC_TARGET_PAGE
     if (linkedFile == new File(docDir, node.text) && linkedFile.isDirectory()) return DOC_TARGET_DIRECTORY
     return null
 }
 
 /**
- * Refreshes the Next Steps of every node of the node's map and records the
- * run time under the config node, so the next run can skip pages whose
- * Markdown file has not been modified since.
- *
- * Deciding which pages changed (stat'ing every linked file) and reading their
- * content both happen on a single background thread, so a map with many
- * nodes doesn't perform per-node file I/O synchronously on the UI thread.
- * Node mutations - updating children and recording the run time - are
- * collected while scanning and applied afterwards in one batch on the Swing
- * EDT, since the node model is only safe to mutate there; batching also means
- * a single map refresh covers the whole run instead of one per changed page.
- *
- * Overlapping runs collapse into a no-op: if a scan triggered earlier (e.g.
- * by the periodic listener) hasn't finished yet, this call returns
- * immediately instead of starting a second concurrent scan.
- */
-def static updateAllNextSteps(node) {
-    def root = node.mindMap.root
-
-    // A single, cheap directory check - resolved eagerly and synchronously so
-    // a missing/misconfigured docDir still fails fast and visibly to callers
-    // such as the manual "Update Next Steps and Search Index" command. Resolving it once here
-    // (instead of per node, as getDocNodeType()/loadDocDir() would) also avoids
-    // re-walking the config node and re-stat'ing docDir for every node below.
-    def docDir = Utils.loadDocDir(root)
-
-    if (!NEXT_STEPS_SCAN_IN_PROGRESS.compareAndSet(false, true)) return
-
-    def sinceMillis = loadNextStepsUpdatedAt(root)
-    def startedAt = System.currentTimeMillis()
-    // Collected up front (cheap, no file I/O) since it just walks the node
-    // tree; the actual per-node file checks happen on the background thread.
-    def targets = collectNodes(root)
-
-    Thread.start {
-        def updates
-        try {
-            updates = [:]
-            for (target in targets) {
-                def lines = readChangedNextSteps(target, docDir, sinceMillis)
-                if (lines != null) updates[target] = lines
-            }
-        } catch (Exception e) {
-            NEXT_STEPS_SCAN_IN_PROGRESS.set(false)
-            return
-        }
-
-        SwingUtilities.invokeLater {
-            try {
-                updates.each { target, lines -> applyNextSteps(target, lines) }
-                saveNextStepsUpdatedAt(root, startedAt)
-            } finally {
-                NEXT_STEPS_SCAN_IN_PROGRESS.set(false)
-            }
-        }
-    }
-}
-
-/**
- * Reads the last time the Next Steps were refreshed from the map's config node.
- * Config structure: root > config > nextStepsUpdatedAt > [epoch millis value]
- * Returns 0 when the timestamp has never been recorded.
- */
-def static loadNextStepsUpdatedAt(node) {
-    def configNode = findChildByText(node.mindMap.root, CONFIG_NODE_NAME)
-    if (!configNode) return 0L
-
-    def keyNode = findChildByText(configNode, LAST_UPDATED_KEY)
-    if (!keyNode) return 0L
-
-    def valueNode = keyNode.children[0]
-    if (!valueNode) return 0L
-
-    try {
-        return Long.parseLong(valueNode.plainText.trim())
-    } catch (NumberFormatException ignored) {
-        return 0L
-    }
-}
-
-/**
- * Records the last time the Next Steps were refreshed under the map's config node,
- * creating the config child nodes on demand.
- */
-def static saveNextStepsUpdatedAt(node, long millis) {
-    def configNode = findChildByText(node.mindMap.root, CONFIG_NODE_NAME)
-    if (!configNode) throw new RuntimeException('config node is missing.')
-
-    def keyNode = findChildByText(configNode, LAST_UPDATED_KEY)
-    if (!keyNode) {
-        keyNode = configNode.createChild()
-        keyNode.text = LAST_UPDATED_KEY
-    }
-
-    def valueNode = keyNode.children[0] ?: keyNode.createChild()
-    valueNode.text = String.valueOf(millis)
-}
-
-/**
- * Maps every file linked from the subtree rooted at the given node to the
- * node that links it, keyed by normalized File (see normalizedFile()). Used
- * both to list which files the map links at all (the key set) and to resolve
- * a search hit (an arbitrary file under the document directory) back to the
- * mind map node a user would want selected - see findNodeForFile().
- *
- * A node whose link points directly at a file (node.link.file) always wins
- * over one that only links it indirectly, through another node
- * (node.link.node.link.file - the other form getLinkedFile() also follows),
- * so an intermediate "see also"-style link never shadows the node that
- * actually represents the document.
+ * Maps every file linked from the subtree at node to the node linking it, keyed
+ * by normalizedFile(). A direct link (node.link.file) wins over an indirect one
+ * (through node.link.node), so a "see also" link never shadows the node that
+ * represents the document.
  */
 def static Map<File, Object> collectNodesByLinkedFile(node) {
     def directNodesByFile = [:]
@@ -188,17 +95,9 @@ def static Map<File, Object> collectNodesByLinkedFile(node) {
 }
 
 /**
- * Resolves a file (e.g. a full-text search hit) to the mind map node that
- * represents it, using a file->node map built by collectNodesByLinkedFile().
- * A search hit is not always a file linked directly from a node; it may be:
- *  - a page or directory file itself (direct match)
- *  - a file inside a linked directory (walking up from the file to docDir,
- *    the first ancestor directory that matches a directory node is used)
- *  - a file under a page's "<page>.assets/" attachments directory (the
- *    sibling "<page>.md" page node is used instead, per the page/assets
- *    convention described in this file's class-level docs)
- * Returns null if no node in the map links the file, any of its ancestor
- * directories, or (for an assets file) its page.
+ * Resolves a file (e.g. a search hit) to its node: the node linking the file
+ * itself, else the nearest ancestor directory's node, else - for a file under
+ * "<page>.assets/" - the page's node. Null if none of those is linked.
  */
 def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir) {
     def normalizedDocDir = normalizedFile(docDir)
@@ -212,8 +111,7 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
         if (hit) return hit
 
         if (dir.name.endsWith('.assets')) {
-            def pageFile = new File(dir.parentFile, dir.name.replaceAll(/\.assets$/, '') + '.md')
-            hit = nodesByFile[pageFile]
+            hit = nodesByFile[pageFile(dir.parentFile, dir.name.replaceAll(/\.assets$/, ''))]
             if (hit) return hit
         }
 
@@ -224,20 +122,14 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
 }
 
 /**
- * The form every file is compared in: absolute, with "." and ".." segments
- * folded away. Pure path arithmetic - unlike File.getCanonicalFile(), which
- * hits the filesystem on every call - so comparing thousands of linked files
- * per search costs nothing. Symlinks are deliberately not resolved.
+ * Absolute path with "." and ".." folded away - pure path arithmetic, unlike
+ * File.getCanonicalFile(), which hits the file system. Symlinks are not resolved.
  */
 def static File normalizedFile(File file) {
     return file.toPath().toAbsolutePath().normalize().toFile()
 }
 
-/**
- * Builds a human-readable "root > ... > text" path for a node, walking up
- * through getParent(). Used by Search.groovy to show a result's position in
- * the map without requiring it to be selected first.
- */
+/** "root > ... > text" for a node. */
 def static nodePathText(node) {
     def parts = []
     def current = node
@@ -249,24 +141,54 @@ def static nodePathText(node) {
 }
 
 /**
- * Opens a file or directory in the OS's default application.
- *
- * A thin wrapper over java.awt.Desktop, kept here rather than called inline from
- * the scripts so that the scripts stay drivable from a test: Desktop is both
- * unavailable in a headless JVM and genuinely side-effecting (it spawns an
- * external application), so tests replace this method instead.
+ * Opens a file or directory in the OS's default application. Lives here, not
+ * inline in the scripts, so specs can replace it: Desktop is unusable headless.
  */
 def static openInDesktop(File file) {
     java.awt.Desktop.getDesktop().open(file)
 }
 
-// --- Private helper methods ---
+// --- Derived state: Next Steps children and the search index ---
 
-private static File pageFileOf(node, File docDir) {
-    return new File(docDir, node.text + '.md')
+/**
+ * Refreshes both pieces of derived state - every page's Next Steps children and
+ * the full-text index - in the background. Fails fast (synchronously) when the
+ * document directory is not configured.
+ */
+def static updateNextStepsAndIndex(node) {
+    def docDir = loadDocDir(node)
+    updateAllNextSteps(node)
+    Thread.start { SearchIndex.updateIndex(docDir) }
 }
 
-/** Calls action for the node and, depth-first, every node below it. */
+/**
+ * Syncs the "### Next Steps" list items of every page in the map into the page
+ * node's children. Files are read on a background thread; the node mutations
+ * are then applied in one batch on the Swing EDT, and only for pages whose
+ * items actually differ from the current children, so an unchanged map stays
+ * untouched (and unmodified).
+ */
+def static updateAllNextSteps(node) {
+    def root = node.mindMap.root
+    def docDir = loadDocDir(root)
+    def targets = collectNodes(root)
+
+    Thread.start {
+        def nextSteps = [:]
+        for (target in targets) {
+            def lines = readNextSteps(target, docDir)
+            if (lines != null) nextSteps[target] = lines
+        }
+        SwingUtilities.invokeLater {
+            nextSteps.each { target, lines ->
+                if (target.children*.text != lines) applyNextSteps(target, lines)
+            }
+        }
+    }
+}
+
+// --- Private helper methods ---
+
 private static void eachNode(node, Closure action) {
     action(node)
     for (child in node.children) {
@@ -284,52 +206,28 @@ private static findChildByText(parentNode, String text) {
     return parentNode.children.find { it.text == text }
 }
 
-private static String loadDocDirPath(configNode) {
-    for (child in configNode.children) {
-        if (child.text in DOC_DIR_PATH_KEYS && child.children[0]) {
-            return child.children[0].plainText
+/**
+ * The Next Steps items of a page node, or null for anything else: a node that
+ * isn't a page, or one whose file can't be read (so one broken link doesn't
+ * interrupt the scan of the rest of the map).
+ */
+private static List<String> readNextSteps(node, File docDir) {
+    try {
+        def pageFile = pageFile(docDir, node.text)
+        if (getLinkedFile(node) != pageFile || !pageFile.isFile()) return null
+        return pageFile.withReader('UTF-8') { reader ->
+            skipToNextStepsHeading(reader)
+            readNextStepLines(reader)
         }
+    } catch (Exception ignored) {
+        return null
     }
-    return null
 }
 
 private static void skipToNextStepsHeading(Reader reader) {
     while (true) {
         String line = reader.readLine()
         if (line == null || line == NEXT_STEPS_HEADING) break
-    }
-}
-
-private static List<String> readNextStepLinesFromFile(File pageFile) {
-    def lines
-    pageFile.withReader { reader ->
-        skipToNextStepsHeading(reader)
-        lines = readNextStepLines(reader)
-    }
-    return lines
-}
-
-/**
- * The Next Steps lines of a page node whose file changed after sinceMillis,
- * or null for anything else: a node that isn't a page, an unchanged page, or
- * an unreadable one - the last returned rather than thrown, so one broken
- * link doesn't interrupt scanning the rest of the map. Takes the
- * already-resolved docDir instead of re-deriving it per node.
- */
-private static List<String> readChangedNextSteps(node, File docDir, long sinceMillis) {
-    try {
-        def pageFile = pageFileOf(node, docDir)
-        if (getLinkedFile(node) != pageFile || !pageFile.isFile()) return null
-        if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return null
-        return readNextStepLinesFromFile(pageFile)
-    } catch (Exception ignored) {
-        return null
-    }
-}
-
-private static void clearChildren(node) {
-    for (child in node.getChildren()) {
-        child.delete()
     }
 }
 
@@ -347,14 +245,15 @@ private static List<String> readNextStepLines(Reader reader) {
     return lines
 }
 
-private static void applyNextSteps(node, List<String> lines) {
-    clearChildren(node)
-    for (line in lines) {
-        def newNode = node.createChild()
-        newNode.text = line
-    }
-}
-
 private static boolean isListItem(String line) {
     return (line.startsWith('* ') || line.startsWith('- ')) && line.length() > MIN_LIST_ITEM_LENGTH
+}
+
+private static void applyNextSteps(node, List<String> lines) {
+    for (child in node.getChildren()) {
+        child.delete()
+    }
+    for (line in lines) {
+        node.createChild().text = line
+    }
 }

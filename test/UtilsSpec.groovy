@@ -2,21 +2,12 @@ import spock.lang.Specification
 import spock.lang.TempDir
 import spock.util.concurrent.PollingConditions
 
-import javax.swing.SwingUtilities
 import java.nio.file.Path
 
 class UtilsSpec extends Specification {
 
     @TempDir
     Path tempDir
-
-    def cleanup() {
-        // updateAllNextSteps() releases its in-progress guard at the very end of
-        // the EDT job that applies its results, i.e. possibly a moment after a
-        // test has already observed those results. Draining the EDT here keeps
-        // the next test's call from being swallowed as an "overlapping" run.
-        SwingUtilities.invokeAndWait { }
-    }
 
     // --- Helper methods to create mock node structures ---
 
@@ -57,25 +48,6 @@ class UtilsSpec extends Specification {
         def docDir = tempDir.resolve('docs').toFile()
         docDir.mkdirs()
         def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        def result = Utils.loadDocDir(node)
-
-        then:
-        result == docDir
-    }
-
-    def "loadDocDir supports legacy pageDirPath config key"() {
-        given:
-        def docDir = tempDir.resolve('pages').toFile()
-        docDir.mkdirs()
-        def docDirNode = createMockNode(plainText: docDir.absolutePath)
-        def configKeyNode = createMockNode(text: 'pageDirPath', children: [docDirNode])
-        def configNode = createMockNode(text: 'config', children: [configKeyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
         def node = createMockNode(mindMap: mindMap)
 
         when:
@@ -378,35 +350,43 @@ class UtilsSpec extends Specification {
 
     // --- Tests for updateAllNextSteps ---
 
-    /**
-     * Runs updateAllNextSteps() over a map holding one page node ("Task")
-     * whose file has the given text, waits for the children to be applied on
-     * the EDT, and returns them. existingChildren are attached to the page
-     * node beforehand.
-     */
-    private List nextStepsOf(String pageText, List existingChildren = []) {
+    private File nextStepsDocDir() {
         def docDir = tempDir.resolve('docs').toFile()
         docDir.mkdirs()
-        new File(docDir, 'Task.md').text = pageText
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def taskNode = createMockNode(text: 'Task', linkFile: new File(docDir, 'Task.md'), mindMap: mindMap,
-                children: existingChildren)
+        return docDir
+    }
+
+    /** A page node for <docDir>/<name>.md holding the given text, attached under the map root. */
+    private pageNode(mindMap, File docDir, String name, String pageText, List existingChildren = []) {
+        def pageFile = new File(docDir, name + '.md')
+        pageFile.text = pageText
+        def node = createMockNode(text: name, linkFile: pageFile, mindMap: mindMap, children: existingChildren)
         // A copy, like Freeplane's node model, so children can be deleted while iterating.
-        taskNode.getChildren = { -> new ArrayList(taskNode.children) }
-        mindMap.root.children << taskNode
+        node.getChildren = { -> new ArrayList(node.children) }
+        mindMap.root.children << node
+        return node
+    }
+
+    /**
+     * Runs updateAllNextSteps() over a map holding one page ("Task") with the
+     * given text and waits until its children read as expected.
+     */
+    private void expectNextSteps(String pageText, List<String> expected, List existingChildren = []) {
+        def docDir = nextStepsDocDir()
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
         mindMap.root.mindMap = mindMap
+        def taskNode = pageNode(mindMap, docDir, 'Task', pageText, existingChildren)
 
         Utils.updateAllNextSteps(mindMap.root)
 
         new PollingConditions(timeout: 2).eventually {
-            mindMap.root.children.find { it.text == 'config' }.children.any { it.text == 'nextStepsUpdatedAt' }
+            assert taskNode.children*.text == expected
         }
-        return taskNode.children
     }
 
     def "updateAllNextSteps syncs up to three list items under the Next Steps heading"() {
         expect:
-        nextStepsOf("""\
+        expectNextSteps("""\
 [assets](Task.assets)
 
 ## Contents
@@ -419,22 +399,22 @@ class UtilsSpec extends Specification {
 * Fourth step (should be ignored)
 
 ## Journal
-""")*.text == ['First step', 'Second step', 'Third step']
+""", ['First step', 'Second step', 'Third step'])
     }
 
     def "updateAllNextSteps accepts dash list items"() {
         expect:
-        nextStepsOf("""\
+        expectNextSteps("""\
 ### Next Steps
 
 - Step A
 - Step B
-""")*.text == ['Step A', 'Step B']
+""", ['Step A', 'Step B'])
     }
 
     def "updateAllNextSteps stops at the next heading"() {
         expect:
-        nextStepsOf("""\
+        expectNextSteps("""\
 ### Next Steps
 
 * Only step
@@ -442,7 +422,7 @@ class UtilsSpec extends Specification {
 ### Another Section
 
 * Should not appear
-""")*.text == ['Only step']
+""", ['Only step'])
     }
 
     def "updateAllNextSteps replaces the existing children of a changed page"() {
@@ -452,171 +432,56 @@ class UtilsSpec extends Specification {
         existingChild.delete = { -> existingChildren.remove(existingChild) }
 
         expect:
-        nextStepsOf("""\
+        expectNextSteps("""\
 ### Next Steps
 
 * New step
-""", existingChildren)*.text == ['New step']
+""", ['New step'], existingChildren)
     }
 
-    def "updateAllNextSteps updates every page node of the map and records the run time"() {
+    def "updateAllNextSteps updates every page node of the map"() {
         given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def taskFile = new File(docDir, 'Task.md')
-        taskFile.text = """\
-### Next Steps
-
-* First step
-"""
-        def otherFile = new File(docDir, 'Other.md')
-        otherFile.text = """\
-### Next Steps
-
-* Other step
-"""
+        def docDir = nextStepsDocDir()
         def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def configNode = mindMap.root.children[0]
-        def taskNode = createMockNode(text: 'Task', linkFile: taskFile, mindMap: mindMap)
-        def otherNode = createMockNode(text: 'Other', linkFile: otherFile, mindMap: mindMap)
-        // The second page node is nested, so the whole tree has to be traversed.
-        taskNode.children << otherNode
-        mindMap.root.children << taskNode
         mindMap.root.mindMap = mindMap
+        def taskNode = pageNode(mindMap, docDir, 'Task', "### Next Steps\n\n* First step\n")
+        // Nested under the first page, so the whole tree has to be traversed.
+        def otherFile = new File(docDir, 'Other.md')
+        otherFile.text = "### Next Steps\n\n* Other step\n"
+        def otherNode = createMockNode(text: 'Other', linkFile: otherFile, mindMap: mindMap)
+        taskNode.children << otherNode
 
         when:
         Utils.updateAllNextSteps(mindMap.root)
 
         then:
         new PollingConditions(timeout: 2).eventually {
-            taskNode.children.any { it.text == 'First step' }
-            otherNode.children.any { it.text == 'Other step' }
+            assert taskNode.children.any { it.text == 'First step' }
+            assert otherNode.children*.text == ['Other step']
         }
-        configNode.children.find { it.text == 'nextStepsUpdatedAt' } != null
     }
 
-    def "updateAllNextSteps skips pages that were not modified since the last run"() {
+    def "updateAllNextSteps leaves a page alone whose children already match"() {
         given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* New step
-"""
-        pageFile.setLastModified(1000L)
+        def docDir = nextStepsDocDir()
         def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def configNode = mindMap.root.children[0]
-        configNode.children << createMockNode(text: 'nextStepsUpdatedAt',
-                children: [createMockNode(plainText: '2000')])
-        def deleted = []
-        def existingChild = createMockNode(text: 'Old step')
-        existingChild.delete = { -> deleted << existingChild }
-        def taskNode = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap,
-                children: [existingChild])
-        mindMap.root.children << taskNode
         mindMap.root.mindMap = mindMap
+        def deleted = []
+        def existingChild = createMockNode(text: 'Same step')
+        existingChild.delete = { -> deleted << existingChild }
+        def unchangedNode = pageNode(mindMap, docDir, 'Unchanged', "### Next Steps\n\n* Same step\n", [existingChild])
+        // Applied in the same EDT batch as the unchanged page, so once it shows up
+        // the unchanged page has been evaluated too.
+        def changedNode = pageNode(mindMap, docDir, 'Changed', "### Next Steps\n\n* New step\n")
 
         when:
         Utils.updateAllNextSteps(mindMap.root)
 
         then:
+        new PollingConditions(timeout: 2).eventually {
+            assert changedNode.children*.text == ['New step']
+        }
         deleted.isEmpty()
-        taskNode.children.size() == 1
-        taskNode.children[0].text == 'Old step'
-    }
-
-    // --- Tests for loadNextStepsUpdatedAt / saveNextStepsUpdatedAt ---
-
-    def "loadNextStepsUpdatedAt returns stored timestamp"() {
-        given:
-        def valueNode = createMockNode(plainText: '123456789')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 123456789L
-    }
-
-    def "loadNextStepsUpdatedAt returns 0 when timestamp node is missing"() {
-        given:
-        def configNode = createMockNode(text: 'config', children: [])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 0L
-    }
-
-    def "loadNextStepsUpdatedAt returns 0 when stored value is not a number"() {
-        given:
-        def valueNode = createMockNode(plainText: 'not-a-number')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 0L
-    }
-
-    def "saveNextStepsUpdatedAt creates the timestamp node when absent"() {
-        given:
-        def configNode = createMockNode(text: 'config', children: [])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 987654321L)
-
-        then:
-        def keyNode = configNode.children.find { it.text == 'nextStepsUpdatedAt' }
-        keyNode != null
-        keyNode.children[0].text == '987654321'
-    }
-
-    def "saveNextStepsUpdatedAt updates the existing timestamp node"() {
-        given:
-        def valueNode = createMockNode(text: '111')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 222L)
-
-        then:
-        configNode.children.size() == 1
-        keyNode.children.size() == 1
-        valueNode.text == '222'
-    }
-
-    def "saveNextStepsUpdatedAt throws when config node is missing"() {
-        given:
-        def rootNode = createMockNode(children: [])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 1L)
-
-        then:
-        def e = thrown(RuntimeException)
-        e.message == 'config node is missing.'
+        unchangedNode.children == [existingChild]
     }
 }

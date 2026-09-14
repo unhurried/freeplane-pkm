@@ -22,12 +22,9 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.concurrent.atomic.AtomicBoolean
 
-// A dedicated Swing search dialog for the document directory: full-text,
-// case-insensitive, AND-of-keywords search across both file content and file
-// name (see SearchIndex.groovy). Each result can either be opened directly
-// via Utils.openInDesktop(), or - when it corresponds to a page/directory node
-// somewhere in the map - have that node selected and centered instead, so a
-// search result can be used as a shortcut back into the map's own structure.
+// Search dialog for the document directory (see SearchIndex.groovy). A result
+// can be opened in the OS, or - when a node in the map links it - that node
+// selected and centered instead.
 
 def UPDATING_INDEX_STATUS = 'Updating search index...'
 
@@ -39,14 +36,10 @@ try {
     return
 }
 
-// The dialog is modeless and its callbacks keep running after this script
-// returns, so the map root - not the node the script was invoked on - is
-// what all later node lookups/selections are anchored to.
+// The dialog outlives this script, so node lookups are anchored to the map root.
 def mapRoot = node.mindMap.root
 
-// Owned by the main Freeplane window when available, so the dialog can never
-// end up hidden behind the map after a node selection brings the map's own
-// window forward; falls back to an unowned dialog if ui.frame isn't usable.
+// Owned by the Freeplane window, so selecting a node never hides the dialog behind the map.
 Frame owner = null
 try {
     owner = (Frame) ui.frame
@@ -54,11 +47,9 @@ try {
     // Fall back to the default (unowned) dialog below.
 }
 
-// Identifies the dialog belonging to this map and document directory, so a
-// second map's Search window is never mistaken for this one's. Keyed on the
-// identity of the map model rather than on its file path, because a map that
-// was closed and reopened is a new model: its dialog still holds nodes from
-// the old one, which are no longer selectable, so it must not be reused.
+// Identifies this map's dialog for reuse (below). Keyed on the map model's
+// identity, not its path: a reopened map is a new model whose old dialog holds
+// nodes that are no longer selectable.
 def mapId
 try {
     mapId = System.identityHashCode(node.mindMap.delegate)
@@ -67,12 +58,10 @@ try {
 }
 def dialogName = "freeplane-pkm-search|${mapId}|${docDir.absolutePath}".toString()
 
-// Freeplane compiles and runs every menu script invocation with its own script
-// class loader over the add-on's lib jar, so opening a second dialog would
-// load Lucene and Kuromoji's bundled dictionary all over again while the
-// previous copy stays on the heap. Re-showing the window that is already open
-// reuses the copy that is already warm instead; this script then only
-// resolves the document directory and hands the window back.
+// Each menu script invocation gets its own class loader, so a second dialog
+// would reload Lucene and Kuromoji's dictionary while the first copy stays on
+// the heap. Re-show the existing dialog instead; componentShown (below) does
+// the index refresh and focus handling on every show.
 def existingDialog = null
 try {
     existingDialog = owner?.ownedWindows?.find { window ->
@@ -82,8 +71,6 @@ try {
     // No reusable dialog - build a new one below.
 }
 if (existingDialog) {
-    // Re-showing fires componentShown on the existing dialog, which refreshes
-    // the index and restores focus from its own (warm) class loader.
     existingDialog.visible = true
     existingDialog.toFront()
     return
@@ -116,10 +103,7 @@ def updateActionButtons = {
             currentNodes[table.convertRowIndexToModel(viewRow)] != null
 }
 
-// Takes the resolved nodes and their map paths as arguments rather than
-// working them out here: both are derived on the background thread that ran
-// the search (see runSearch), leaving this - the part that has to run on the
-// EDT - to nothing but filling the table.
+// Nodes and paths are resolved on the search thread (see runSearch); this only fills the table.
 def showHits = { List hits, List nodes, List nodePaths ->
     currentHits = hits
     currentNodes = nodes
@@ -145,33 +129,21 @@ def runSearch = {
             SwingUtilities.invokeLater { statusLabel.text = "search failed: ${e.message}" }
         }
 
-        // Resolving the hits to nodes walks the whole map, canonicalizes every
-        // file it links and then builds a "root > ... > node" path per hit.
-        // That stays on this thread instead of running on the EDT together
-        // with the table update: on a large map - or one whose document
-        // directory lives on a network/cloud-synced drive - it is easily long
-        // enough to freeze the window on every single search. Only reads of
-        // the node model happen here; mutations still go through the EDT.
-        def results = hits
+        // Resolving hits to nodes walks the whole map and normalizes every linked
+        // file, so it stays off the EDT. Rebuilt per search so results reflect
+        // links changed since the dialog opened. Reads only; mutations go via EDT.
         def nodes
-        def paths
         try {
-            // Rebuilt on every search (not just once) so results reflect any node
-            // links added, removed or retargeted since the dialog was opened.
             def nodesByFile = Utils.collectNodesByLinkedFile(mapRoot)
-            nodes = results.collect { hit -> Utils.findNodeForFile(nodesByFile, hit.file, docDir) }
-            paths = nodes.collect { targetNode -> targetNode ? Utils.nodePathText(targetNode) : '' }
+            nodes = hits.collect { hit -> Utils.findNodeForFile(nodesByFile, hit.file, docDir) }
         } catch (Exception ignored) {
-            // A hit whose node can't be resolved - e.g. because the map changed
-            // underneath this scan - is still worth showing as a file.
-            nodes = results.collect { null }
-            paths = results.collect { '' }
+            // A hit whose node can't be resolved (map changed underneath) is still worth showing as a file.
+            nodes = hits.collect { null }
         }
-        def targetNodes = nodes
-        def nodePaths = paths
+        def nodePaths = nodes.collect { targetNode -> targetNode ? Utils.nodePathText(targetNode) : '' }
 
         SwingUtilities.invokeLater {
-            showHits(results, targetNodes, nodePaths)
+            showHits(hits, nodes, nodePaths)
             searchButton.enabled = true
         }
     }
@@ -276,15 +248,9 @@ content.add(searchPanel, BorderLayout.NORTH)
 content.add(new JScrollPane(table), BorderLayout.CENTER)
 content.add(statusPanel, BorderLayout.SOUTH)
 
-// Brings the index up to date in the background, so results reflect files
-// added/changed since the last periodic refresh (see init.groovy) without the
-// user having to run "Update Next Steps and Search Index" first. Search still
-// works against whatever is currently on disk while this runs, and simply may
-// miss the most recent changes until it finishes.
-//
-// warmUp() loads the Kuromoji dictionary here, on this background thread,
-// rather than leaving it to the user's first query (an up-to-date index gives
-// updateIndex() nothing to tokenize, so it wouldn't load it either).
+// Brings the index up to date in the background; searching meanwhile works
+// against what is on disk. warmUp() loads the Kuromoji dictionary here rather
+// than on the user's first query.
 def indexRefreshInProgress = new AtomicBoolean(false)
 def refreshIndex = {
     if (!indexRefreshInProgress.compareAndSet(false, true)) return
@@ -305,20 +271,16 @@ def refreshIndex = {
 }
 
 def dialog = new JDialog(owner, 'Search', false)
-// Hidden rather than disposed on close, and tagged with a name, so the next
-// F6 can find and re-show this very dialog instead of building a new one -
-// see the reuse check at the top of this script.
+// Hidden, not disposed, and named, so the next F6 re-shows this dialog (see the top of this script).
 dialog.defaultCloseOperation = JDialog.HIDE_ON_CLOSE
 dialog.name = dialogName
 dialog.contentPane = content
 dialog.size = new Dimension(960, 540)
 dialog.setLocationRelativeTo(owner)
-// Fires on the first show and on every reopen, so a reused dialog refreshes
-// its index and takes focus exactly like a freshly built one.
+// Fires on the first show and on every reopen.
 dialog.addComponentListener(new ComponentAdapter() {
     void componentShown(ComponentEvent event) {
-        // Queued rather than called straight away: this fires while the window
-        // is still being shown, at which point it can't take focus yet.
+        // Queued: the window can't take focus while it is still being shown.
         SwingUtilities.invokeLater {
             keywordField.requestFocusInWindow()
             keywordField.selectAll()

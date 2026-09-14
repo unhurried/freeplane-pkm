@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# PreToolUse hook: refuses a `git commit` whose tree doesn't pass `gradle
-# check`, which is this repo's definition of done (see CLAUDE.md).
-#
-# Wired up in .claude/settings.json. The hook payload arrives as JSON on
-# stdin; the whole .tool_input.command is read (NOT just its first line -
-# a multi-line bash command whose `git commit` sits on a later line used to
-# slip through this gate entirely).
-#
-# On failure it prints the deny decision Claude Code understands, with
-# gradle's own output already on stderr for the reader to act on.
+# PreToolUse hook (wired up in .claude/settings.json): refuses a `git commit`
+# whose tree doesn't pass `gradle check`, this repo's definition of done.
+# The whole .tool_input.command is inspected, not just its first line, so a
+# multi-line command with `git commit` further down doesn't slip through.
 set -uo pipefail
 
 payload=$(cat)
