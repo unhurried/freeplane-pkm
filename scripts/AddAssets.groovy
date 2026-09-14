@@ -1,11 +1,11 @@
-def pageFile = Utils.getPageFile(node)
-if (!pageFile) {
+if (Utils.getDocNodeType(node) != Utils.DOC_TARGET_PAGE) {
     ui.errorMessage('target node is not a page.')
     return
 }
 
 def docDir = Utils.loadDocDir(node)
 def pageName = node.text
+def pageFile = new File(docDir, pageName + '.md')
 def pageAssetsDir = new File(docDir, pageName + '.assets')
 
 if (pageAssetsDir.exists()) {

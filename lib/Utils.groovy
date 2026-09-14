@@ -1,5 +1,4 @@
 import groovy.transform.Field
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
@@ -20,22 +19,6 @@ import javax.swing.SwingUtilities
 // Held from the start of the background scan until its results have been
 // applied on the EDT.
 @Field private static final AtomicBoolean NEXT_STEPS_SCAN_IN_PROGRESS = new AtomicBoolean(false)
-
-// Memoizes File.getCanonicalFile(), which is a filesystem call per invocation
-// (the JDK's own canonicalization cache is off by default). Resolving search
-// hits to nodes canonicalizes every linked file in the map plus every hit and
-// its parent directories, so without this a search on a large map means
-// thousands of stat calls - every single time.
-//
-// Keyed by the file's path, and used for both sides of every comparison, so a
-// cached answer can only ever be "wrong" in the sense of being consistent with
-// itself: an entry goes stale only if a symlink along the path is retargeted
-// while Freeplane is running, and both the linked file and the search hit then
-// still resolve the same way.
-@Field private static final Map<String, File> CANONICAL_FILE_CACHE = new ConcurrentHashMap<String, File>()
-// Cleared wholesale rather than evicted entry by entry: the cache is a
-// throwaway speed-up, and a map big enough to reach this has bigger problems.
-@Field private static final int MAX_CANONICAL_FILE_CACHE_ENTRIES = 20000
 
 /**
  * Loads the document directory path from the mind map's config node.
@@ -65,68 +48,18 @@ def static getLinkedFile(node) {
 }
 
 /**
- * Determines whether the node represents a page or directory document.
- * Returns DOC_TARGET_PAGE, DOC_TARGET_DIRECTORY, or null.
+ * Determines whether the node represents a page (its link is the existing
+ * file <docDir>/<text>.md) or a directory (the existing directory
+ * <docDir>/<text>/). Returns DOC_TARGET_PAGE, DOC_TARGET_DIRECTORY, or null.
  */
 def static getDocNodeType(node) {
-    def linkedFile = Utils.getLinkedFile(node)
-    if (!linkedFile?.exists()) return null
+    def linkedFile = getLinkedFile(node)
+    if (!linkedFile) return null
 
-    def docDir = Utils.loadDocDir(node)
-    def docName = node.text
-
-    if (isPageNode(linkedFile, docDir, docName)) {
-        return Utils.DOC_TARGET_PAGE
-    }
-    if (isDirectoryNode(linkedFile, docDir, docName)) {
-        return Utils.DOC_TARGET_DIRECTORY
-    }
-
+    def docDir = loadDocDir(node)
+    if (linkedFile == pageFileOf(node, docDir) && linkedFile.isFile()) return DOC_TARGET_PAGE
+    if (linkedFile == new File(docDir, node.text) && linkedFile.isDirectory()) return DOC_TARGET_DIRECTORY
     return null
-}
-
-/**
- * Returns the page file (.md) linked from the node, or null if not applicable.
- * Throws RuntimeException if the node links to a page file that doesn't exist.
- */
-def static getPageFile(node) {
-    def pageFile = Utils.getLinkedFile(node)
-    if (!pageFile) return null
-
-    def docDir = Utils.loadDocDir(node)
-    def expectedFile = new File(docDir, node.text + '.md')
-    if (pageFile != expectedFile) return null
-
-    if (!pageFile.exists()) throw new RuntimeException('page file is missing.')
-
-    return pageFile
-}
-
-/**
- * Reads the "### Next Steps" section from the page file and updates
- * the node's children with up to MAX_NEXT_STEPS items.
- *
- * When sinceMillis > 0, the page file is only re-read if it was modified
- * after that time; otherwise the node's existing children are left untouched.
- * This lets callers skip pages that have not changed since the last run.
- *
- * The file read happens on a background thread so callers (e.g. a loop over
- * every node in the map) don't block the UI thread on disk I/O. The node
- * update is then applied on the UI thread, since Freeplane's node model
- * (e.g. child creation/deletion) is only safe to mutate from there.
- */
-def static updateNextSteps(node, long sinceMillis = 0) {
-    def pageFile = Utils.getPageFile(node)
-    if (!pageFile) return
-
-    if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return
-
-    Thread.start {
-        def nextStepLines = readNextStepLinesFromFile(pageFile)
-        SwingUtilities.invokeLater {
-            applyNextSteps(node, nextStepLines)
-        }
-    }
 }
 
 /**
@@ -152,7 +85,7 @@ def static updateAllNextSteps(node) {
     // A single, cheap directory check - resolved eagerly and synchronously so
     // a missing/misconfigured docDir still fails fast and visibly to callers
     // such as the manual "Update Next Steps and Search Index" command. Resolving it once here
-    // (instead of per node, as getPageFile()/loadDocDir() would) also avoids
+    // (instead of per node, as getDocNodeType()/loadDocDir() would) also avoids
     // re-walking the config node and re-stat'ing docDir for every node below.
     def docDir = Utils.loadDocDir(root)
 
@@ -229,20 +162,11 @@ def static saveNextStepsUpdatedAt(node, long millis) {
 }
 
 /**
- * Recursively collects all files linked from nodes in the subtree rooted at the given node.
- * Returns a Set of canonical File objects.
- */
-def static collectLinkedFiles(node) {
-    def linkedFiles = new HashSet<File>()
-    collectLinkedFilesRecursive(node, linkedFiles)
-    return linkedFiles
-}
-
-/**
  * Maps every file linked from the subtree rooted at the given node to the
- * node that links it, keyed by canonical File. Used to resolve a search hit
- * (an arbitrary file under the document directory) back to the mind map node
- * a user would want selected - see findNodeForFile().
+ * node that links it, keyed by normalized File (see normalizedFile()). Used
+ * both to list which files the map links at all (the key set) and to resolve
+ * a search hit (an arbitrary file under the document directory) back to the
+ * mind map node a user would want selected - see findNodeForFile().
  *
  * A node whose link points directly at a file (node.link.file) always wins
  * over one that only links it indirectly, through another node
@@ -253,7 +177,13 @@ def static collectLinkedFiles(node) {
 def static Map<File, Object> collectNodesByLinkedFile(node) {
     def directNodesByFile = [:]
     def indirectNodesByFile = [:]
-    collectNodesByLinkedFileRecursive(node, directNodesByFile, indirectNodesByFile)
+    eachNode(node) { n ->
+        if (n.link.file) {
+            directNodesByFile[normalizedFile(n.link.file)] = n
+        } else if (getLinkedFile(n)) {
+            indirectNodesByFile[normalizedFile(getLinkedFile(n))] = n
+        }
+    }
     return indirectNodesByFile + directNodesByFile
 }
 
@@ -271,8 +201,8 @@ def static Map<File, Object> collectNodesByLinkedFile(node) {
  * directories, or (for an assets file) its page.
  */
 def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir) {
-    def canonicalDocDir = canonicalFileOf(docDir)
-    def current = canonicalFileOf(file)
+    def normalizedDocDir = normalizedFile(docDir)
+    def current = normalizedFile(file)
     def hit = nodesByFile[current]
     if (hit) return hit
 
@@ -283,14 +213,24 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
 
         if (dir.name.endsWith('.assets')) {
             def pageFile = new File(dir.parentFile, dir.name.replaceAll(/\.assets$/, '') + '.md')
-            hit = nodesByFile[canonicalFileOf(pageFile)]
+            hit = nodesByFile[pageFile]
             if (hit) return hit
         }
 
-        if (dir == canonicalDocDir) break
+        if (dir == normalizedDocDir) break
         dir = dir.parentFile
     }
     return null
+}
+
+/**
+ * The form every file is compared in: absolute, with "." and ".." segments
+ * folded away. Pure path arithmetic - unlike File.getCanonicalFile(), which
+ * hits the filesystem on every call - so comparing thousands of linked files
+ * per search costs nothing. Symlinks are deliberately not resolved.
+ */
+def static File normalizedFile(File file) {
+    return file.toPath().toAbsolutePath().normalize().toFile()
 }
 
 /**
@@ -322,53 +262,22 @@ def static openInDesktop(File file) {
 
 // --- Private helper methods ---
 
-/**
- * File.getCanonicalFile(), memoized per path - see CANONICAL_FILE_CACHE. A
- * miss resolves the file as before and records the answer; reaching the
- * cache's bound empties it first, so it never grows without limit and the
- * result never depends on whether an entry happened to be cached.
- */
-private static File canonicalFileOf(File file) {
-    def cached = CANONICAL_FILE_CACHE[file.path]
-    if (cached) return cached
+private static File pageFileOf(node, File docDir) {
+    return new File(docDir, node.text + '.md')
+}
 
-    def canonical = file.canonicalFile
-    if (CANONICAL_FILE_CACHE.size() >= MAX_CANONICAL_FILE_CACHE_ENTRIES) CANONICAL_FILE_CACHE.clear()
-    CANONICAL_FILE_CACHE[file.path] = canonical
-    return canonical
+/** Calls action for the node and, depth-first, every node below it. */
+private static void eachNode(node, Closure action) {
+    action(node)
+    for (child in node.children) {
+        eachNode(child, action)
+    }
 }
 
 private static List collectNodes(node) {
     def nodes = []
-    collectNodesRecursive(node, nodes)
+    eachNode(node) { nodes << it }
     return nodes
-}
-
-private static void collectNodesRecursive(node, List nodes) {
-    nodes.add(node)
-    for (child in node.children) {
-        collectNodesRecursive(child, nodes)
-    }
-}
-
-private static void collectLinkedFilesRecursive(node, Set<File> linkedFiles) {
-    def linkedFile = getLinkedFile(node)
-    if (linkedFile) linkedFiles.add(canonicalFileOf(linkedFile))
-    for (child in node.children) {
-        collectLinkedFilesRecursive(child, linkedFiles)
-    }
-}
-
-private static void collectNodesByLinkedFileRecursive(node, Map direct, Map indirect) {
-    if (node.link.file) {
-        direct[canonicalFileOf(node.link.file)] = node
-    } else {
-        def linkedFile = getLinkedFile(node)
-        if (linkedFile) indirect[canonicalFileOf(linkedFile)] = node
-    }
-    for (child in node.children) {
-        collectNodesByLinkedFileRecursive(child, direct, indirect)
-    }
 }
 
 private static findChildByText(parentNode, String text) {
@@ -382,16 +291,6 @@ private static String loadDocDirPath(configNode) {
         }
     }
     return null
-}
-
-private static boolean isPageNode(File linkedFile, File docDir, String docName) {
-    def pageFile = new File(docDir, docName + '.md')
-    return linkedFile == pageFile && pageFile.exists()
-}
-
-private static boolean isDirectoryNode(File linkedFile, File docDir, String docName) {
-    def directoryDir = new File(docDir, docName)
-    return linkedFile == directoryDir && directoryDir.exists() && directoryDir.isDirectory()
 }
 
 private static void skipToNextStepsHeading(Reader reader) {
@@ -411,22 +310,17 @@ private static List<String> readNextStepLinesFromFile(File pageFile) {
 }
 
 /**
- * Batch-scan variant of getPageFile() + updateNextSteps()'s gate: takes the
- * already-resolved docDir instead of re-deriving it per node, and returns
- * null - rather than throwing - for a node that isn't a valid, unchanged, or
- * readable page, so one broken link doesn't interrupt scanning the rest of
- * the map.
+ * The Next Steps lines of a page node whose file changed after sinceMillis,
+ * or null for anything else: a node that isn't a page, an unchanged page, or
+ * an unreadable one - the last returned rather than thrown, so one broken
+ * link doesn't interrupt scanning the rest of the map. Takes the
+ * already-resolved docDir instead of re-deriving it per node.
  */
 private static List<String> readChangedNextSteps(node, File docDir, long sinceMillis) {
     try {
-        def linkedFile = getLinkedFile(node)
-        if (!linkedFile) return null
-
-        def pageFile = new File(docDir, node.text + '.md')
-        if (linkedFile != pageFile || !pageFile.exists()) return null
-
+        def pageFile = pageFileOf(node, docDir)
+        if (getLinkedFile(node) != pageFile || !pageFile.isFile()) return null
         if (sinceMillis > 0 && pageFile.lastModified() <= sinceMillis) return null
-
         return readNextStepLinesFromFile(pageFile)
     } catch (Exception ignored) {
         return null

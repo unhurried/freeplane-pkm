@@ -14,11 +14,6 @@ def editText(ui, node) {
 
 def renamePage(ui, node, docDir, pageName, newName) {
     def pageFile = new File(docDir, pageName + '.md')
-    if (!pageFile.exists()) {
-        ui.errorMessage('page file is missing.')
-        return
-    }
-
     def pageAssetsDir = new File(docDir, pageName + '.assets')
 
     def newPageFile = new File(docDir, newName + '.md')
@@ -63,11 +58,6 @@ def renamePage(ui, node, docDir, pageName, newName) {
 
 def renameDirectory(ui, node, docDir, directoryName, newName) {
     def directoryDir = new File(docDir, directoryName)
-    if (!directoryDir.exists() || !directoryDir.isDirectory()) {
-        ui.errorMessage('directory is missing.')
-        return
-    }
-
     def newDirectoryDir = new File(docDir, newName)
     if (newDirectoryDir.exists()) {
         ui.errorMessage('new directory already exists.')

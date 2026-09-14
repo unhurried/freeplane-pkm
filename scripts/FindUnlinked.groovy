@@ -16,7 +16,8 @@ if (!unlinkedNode) {
     }
 }
 
-def linkedFiles = Utils.collectLinkedFiles(node.mindMap.root)
+def linkedFiles = Utils.collectNodesByLinkedFile(rootNode).keySet()
+def isLinked = { File file -> linkedFiles.contains(Utils.normalizedFile(file)) }
 
 def unlinkedPages = []
 def unlinkedDirs = []
@@ -24,7 +25,7 @@ def unlinkedAssets = []
 docDir.eachFile { file ->
     if (file.isDirectory() && file.name == SearchIndex.INDEX_DIR_NAME) {
         // The search index is maintenance data, not a document - never report it.
-    } else if (file.isFile() && file.name.endsWith('.md') && !linkedFiles.contains(file.canonicalFile)) {
+    } else if (file.isFile() && file.name.endsWith('.md') && !isLinked(file)) {
         unlinkedPages << file
     } else if (file.isDirectory() && file.name.endsWith('.assets')) {
         def baseName = file.name.replaceAll(/\.assets$/, '')
@@ -32,7 +33,7 @@ docDir.eachFile { file ->
         if (!pageFile.exists()) {
             unlinkedAssets << file
         }
-    } else if (file.isDirectory() && !linkedFiles.contains(file.canonicalFile)) {
+    } else if (file.isDirectory() && !isLinked(file)) {
         unlinkedDirs << file
     }
 }

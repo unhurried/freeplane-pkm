@@ -1,31 +1,18 @@
 import javax.swing.JOptionPane
 
 def deletePage(ui, node, docDir, pageName) {
-    def pageFile = new File(docDir, pageName + '.md')
-    if (!pageFile.exists()) {
-        ui.errorMessage('page file is missing.')
-        return
-    }
-
-    def pageAssetsDir = new File(docDir, pageName + '.assets')
-
     if (!confirmAction(ui, node, "Are you sure to delete \"${pageName}\"?")) return
 
-    pageFile.delete()
+    new File(docDir, pageName + '.md').delete()
+    def pageAssetsDir = new File(docDir, pageName + '.assets')
     if (pageAssetsDir.exists()) pageAssetsDir.deleteDir()
     node.delete()
 }
 
 def deleteDirectory(ui, node, docDir, directoryName) {
-    def directoryDir = new File(docDir, directoryName)
-    if (!directoryDir.exists() || !directoryDir.isDirectory()) {
-        ui.errorMessage('directory is missing.')
-        return
-    }
-
     if (!confirmAction(ui, node, "Are you sure to delete directory \"${directoryName}\"?")) return
 
-    if (!directoryDir.deleteDir()) {
+    if (!new File(docDir, directoryName).deleteDir()) {
         ui.errorMessage('failed to delete directory.')
         return
     }
