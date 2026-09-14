@@ -2,8 +2,7 @@
  * Stand-in for the node proxy Freeplane binds as "node", covering the slice of its
  * API the add-on's scripts actually use.
  *
- * A real class rather than an Expando (which UtilsSpec uses for its flatter, parentless
- * fixtures): these nodes form a cyclic parent/child graph, and Expando.toString()
+ * A real class rather than an Expando: these nodes form a cyclic parent/child graph, and Expando.toString()
  * renders its properties recursively, so any failure message that mentions a node
  * overflows the stack. Gradle's JUnit listener then dies while reporting and records
  * the test as skipped instead of failed - i.e. a green build hiding a broken test.
@@ -11,7 +10,6 @@
 class FakeNode {
 
     String text = ''
-    private String plainTextOverride
     FakeNode parent
     /** The live child list; getChildren()/children hand out a copy, as Freeplane does. */
     final List<FakeNode> childNodes = []
@@ -23,9 +21,7 @@ class FakeNode {
     /** Dialog owner the scripts pass to ui.showInputDialog()/showConfirmDialog(). */
     def delegate
 
-    String getPlainText() { plainTextOverride ?: text }
-
-    void setPlainText(String value) { plainTextOverride = value }
+    String getPlainText() { text }
 
     /** Freeplane exposes the map as both node.mindMap and node.map. */
     def getMap() { mindMap }

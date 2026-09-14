@@ -29,7 +29,7 @@ pageAssetsDir.mkdir()
 
 def pageText = Utils.readPage(templateFile)
 pageText = pageText.replace('${page_assets_name}', pageAssetsDir.name)
-pageText = pageText.replace('${today}', new Date().format('yy/MM/dd'))
+pageText = pageText.replace('${today}', new Date().format(Utils.DATE_FORMAT))
 Utils.writePage(pageFile, pageText)
 
 node.link.file = pageFile

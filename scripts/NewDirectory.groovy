@@ -6,7 +6,7 @@ if (!Utils.isValidName(directoryName)) {
     return
 }
 
-def directoryDir = new File(docDir, directoryName)
+def directoryDir = Utils.directoryDir(docDir, directoryName)
 if (directoryDir.exists()) {
     ui.errorMessage('directory already exists.')
     return

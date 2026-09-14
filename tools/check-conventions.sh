@@ -78,13 +78,13 @@ fi
 
 # --- 4. Node fixtures use FakeNode, not Expando ---
 # A cyclic Expando's toString() overflows the stack inside Gradle's JUnit
-# listener, which records the failing test as skipped. ScriptSpec and
-# UtilsSpec only use Expando for acyclic fixtures.
+# listener, which records the failing test as skipped. ScriptSpec alone uses
+# Expando, for its acyclic controller/UI/map fakes.
 
 while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     fail "$f builds fixtures with 'new Expando(' - use test/FakeNode.groovy (see its class doc)."
-done <<< "$(grep -rl 'new Expando(' test/ 2>/dev/null | grep -vE '^test/(ScriptSpec|UtilsSpec)\.groovy$' || true)"
+done <<< "$(grep -rl 'new Expando(' test/ 2>/dev/null | grep -vx 'test/ScriptSpec.groovy' || true)"
 
 if [[ "$violations" -gt 0 ]]; then
     echo "check-conventions: $violations violation(s) found." >&2

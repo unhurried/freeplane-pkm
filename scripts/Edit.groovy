@@ -1,10 +1,13 @@
 // A page or directory node is renamed on disk (and its node/link updated), since
 // editing the text alone would desynchronize the node from the file system. Any
 // other node just gets its text edited through the same input dialog.
+//
+// The rename methods reach node and ui through the script bindings; only docDir,
+// a script-local variable, has to be passed in.
 
-def renamePage(ui, node, docDir, pageName, newName) {
-    def pageFile = Utils.pageFile(docDir, pageName)
-    def pageAssetsDir = Utils.assetsDir(docDir, pageName)
+def renamePage(File docDir, String newName) {
+    def pageFile = Utils.pageFile(docDir, node.text)
+    def pageAssetsDir = Utils.assetsDir(docDir, node.text)
     def newPageFile = Utils.pageFile(docDir, newName)
     def newPageAssetsDir = Utils.assetsDir(docDir, newName)
 
@@ -37,13 +40,13 @@ def renamePage(ui, node, docDir, pageName, newName) {
     node.link.file = newPageFile
 }
 
-def renameDirectory(ui, node, docDir, directoryName, newName) {
-    def newDirectoryDir = new File(docDir, newName)
+def renameDirectory(File docDir, String newName) {
+    def newDirectoryDir = Utils.directoryDir(docDir, newName)
     if (newDirectoryDir.exists()) {
         ui.errorMessage('new directory already exists.')
         return
     }
-    if (!new File(docDir, directoryName).renameTo(newDirectoryDir)) {
+    if (!Utils.directoryDir(docDir, node.text).renameTo(newDirectoryDir)) {
         ui.errorMessage('failed to rename directory.')
         return
     }
@@ -68,7 +71,7 @@ if (!Utils.isValidName(newName)) {
 
 def docDir = Utils.loadDocDir(node)
 if (docNodeType == Utils.DOC_TARGET_PAGE) {
-    renamePage(ui, node, docDir, node.text, newName)
+    renamePage(docDir, newName)
 } else {
-    renameDirectory(ui, node, docDir, node.text, newName)
+    renameDirectory(docDir, newName)
 }

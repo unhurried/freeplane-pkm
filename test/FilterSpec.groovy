@@ -12,8 +12,7 @@ class FilterSpec extends ScriptSpec {
     }
 
     List lastFlags() {
-        def args = filterCalls.last()
-        return args.size() > 1 ? args[0..-2] : []
+        return filterCalls.last().init()
     }
 
     def "an empty command hides everything under an archive node"() {

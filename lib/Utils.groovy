@@ -4,8 +4,13 @@ import javax.swing.SwingUtilities
 @Field static final DOC_TARGET_PAGE = 'page'
 @Field static final DOC_TARGET_DIRECTORY = 'directory'
 
+/** Date format used for due dates and journal entries throughout the map and pages. */
+@Field static final String DATE_FORMAT = 'yy/MM/dd'
+
 @Field private static final String CONFIG_NODE_NAME = 'config'
 @Field private static final String DOC_DIR_PATH_KEY = 'docDirPath'
+@Field private static final String PAGE_SUFFIX = '.md'
+@Field private static final String ASSETS_SUFFIX = '.assets'
 @Field private static final String NEXT_STEPS_HEADING = '### Next Steps'
 @Field private static final int MAX_NEXT_STEPS = 3
 // "* " / "- " plus at least 2 more characters, so "* x" isn't a list item.
@@ -30,12 +35,31 @@ def static loadDocDir(node) {
     return docDir
 }
 
+def static findChildByText(parentNode, String text) {
+    return parentNode.children.find { it.text == text }
+}
+
 def static File pageFile(File docDir, String name) {
-    return new File(docDir, name + '.md')
+    return new File(docDir, name + PAGE_SUFFIX)
 }
 
 def static File assetsDir(File docDir, String name) {
-    return new File(docDir, name + '.assets')
+    return new File(docDir, name + ASSETS_SUFFIX)
+}
+
+def static File directoryDir(File docDir, String name) {
+    return new File(docDir, name)
+}
+
+/** The page name of a <name>.md file, or null when the name has no ".md" suffix. */
+def static String pageNameOf(File file) {
+    return file.name.endsWith(PAGE_SUFFIX) ? file.name - PAGE_SUFFIX : null
+}
+
+/** The page file an assets directory belongs to, or null when the name has no ".assets" suffix. */
+def static File pageFileOfAssetsDir(File assetsDir) {
+    if (!assetsDir.name.endsWith(ASSETS_SUFFIX)) return null
+    return pageFile(assetsDir.parentFile, assetsDir.name - ASSETS_SUFFIX)
 }
 
 def static boolean isValidName(String name) {
@@ -55,23 +79,21 @@ def static void writePage(File file, String text) {
 
 /** The file linked from the node, directly or via a linked node. */
 def static getLinkedFile(node) {
-    if (node.link.node && node.link.node.link.file) {
-        return node.link.node.link.file
-    }
-    return node.link.file ?: null
+    return node.link.node?.link?.file ?: node.link.file
 }
 
 /**
  * DOC_TARGET_PAGE if the node links the existing file <docDir>/<text>.md,
  * DOC_TARGET_DIRECTORY if it links the existing directory <docDir>/<text>/, else null.
+ * Pass docDir when it is already loaded (callers that classify many nodes).
  */
-def static getDocNodeType(node) {
+def static getDocNodeType(node, File docDir = null) {
     def linkedFile = getLinkedFile(node)
     if (!linkedFile) return null
 
-    def docDir = loadDocDir(node)
-    if (linkedFile == pageFile(docDir, node.text) && linkedFile.isFile()) return DOC_TARGET_PAGE
-    if (linkedFile == new File(docDir, node.text) && linkedFile.isDirectory()) return DOC_TARGET_DIRECTORY
+    def dir = docDir ?: loadDocDir(node)
+    if (linkedFile == pageFile(dir, node.text) && linkedFile.isFile()) return DOC_TARGET_PAGE
+    if (linkedFile == directoryDir(dir, node.text) && linkedFile.isDirectory()) return DOC_TARGET_DIRECTORY
     return null
 }
 
@@ -87,9 +109,10 @@ def static Map<File, Object> collectNodesByLinkedFile(node) {
     eachNode(node) { n ->
         if (n.link.file) {
             directNodesByFile[normalizedFile(n.link.file)] = n
-        } else if (getLinkedFile(n)) {
-            indirectNodesByFile[normalizedFile(getLinkedFile(n))] = n
+            return
         }
+        def linkedFile = getLinkedFile(n)
+        if (linkedFile) indirectNodesByFile[normalizedFile(linkedFile)] = n
     }
     return indirectNodesByFile + directNodesByFile
 }
@@ -107,13 +130,8 @@ def static findNodeForFile(Map<File, Object> nodesByFile, File file, File docDir
 
     def dir = current.parentFile
     while (dir != null) {
-        hit = nodesByFile[dir]
+        hit = nodesByFile[dir] ?: nodesByFile[pageFileOfAssetsDir(dir)]
         if (hit) return hit
-
-        if (dir.name.endsWith('.assets')) {
-            hit = nodesByFile[pageFile(dir.parentFile, dir.name.replaceAll(/\.assets$/, ''))]
-            if (hit) return hit
-        }
 
         if (dir == normalizedDocDir) break
         dir = dir.parentFile
@@ -140,6 +158,11 @@ def static nodePathText(node) {
     return parts.join(' > ')
 }
 
+/** Deletes every child of the node (children is a copy, so deleting while iterating is safe). */
+def static void deleteChildren(node) {
+    node.children*.delete()
+}
+
 /**
  * Opens a file or directory in the OS's default application. Lives here, not
  * inline in the scripts, so specs can replace it: Desktop is unusable headless.
@@ -157,7 +180,7 @@ def static openInDesktop(File file) {
  */
 def static updateNextStepsAndIndex(node) {
     def docDir = loadDocDir(node)
-    updateAllNextSteps(node)
+    updateAllNextSteps(node, docDir)
     Thread.start { SearchIndex.updateIndex(docDir) }
 }
 
@@ -168,15 +191,15 @@ def static updateNextStepsAndIndex(node) {
  * items actually differ from the current children, so an unchanged map stays
  * untouched (and unmodified).
  */
-def static updateAllNextSteps(node) {
+def static updateAllNextSteps(node, File docDir = null) {
     def root = node.mindMap.root
-    def docDir = loadDocDir(root)
+    def dir = docDir ?: loadDocDir(root)
     def targets = collectNodes(root)
 
     Thread.start {
         def nextSteps = [:]
         for (target in targets) {
-            def lines = readNextSteps(target, docDir)
+            def lines = readNextSteps(target, dir)
             if (lines != null) nextSteps[target] = lines
         }
         SwingUtilities.invokeLater {
@@ -202,10 +225,6 @@ private static List collectNodes(node) {
     return nodes
 }
 
-private static findChildByText(parentNode, String text) {
-    return parentNode.children.find { it.text == text }
-}
-
 /**
  * The Next Steps items of a page node, or null for anything else: a node that
  * isn't a page, or one whose file can't be read (so one broken link doesn't
@@ -213,36 +232,15 @@ private static findChildByText(parentNode, String text) {
  */
 private static List<String> readNextSteps(node, File docDir) {
     try {
-        def pageFile = pageFile(docDir, node.text)
-        if (getLinkedFile(node) != pageFile || !pageFile.isFile()) return null
-        return pageFile.withReader('UTF-8') { reader ->
-            skipToNextStepsHeading(reader)
-            readNextStepLines(reader)
-        }
+        if (getDocNodeType(node, docDir) != DOC_TARGET_PAGE) return null
+        def lines = pageFile(docDir, node.text).readLines('UTF-8')
+        def start = lines.indexOf(NEXT_STEPS_HEADING)
+        if (start < 0) return []
+        return lines.drop(start + 1).takeWhile { !it.startsWith('#') }
+                .findAll { isListItem(it) }.take(MAX_NEXT_STEPS)*.substring(2)
     } catch (Exception ignored) {
         return null
     }
-}
-
-private static void skipToNextStepsHeading(Reader reader) {
-    while (true) {
-        String line = reader.readLine()
-        if (line == null || line == NEXT_STEPS_HEADING) break
-    }
-}
-
-private static List<String> readNextStepLines(Reader reader) {
-    def lines = []
-    while (true) {
-        String line = reader.readLine()
-        if (line == null || line.startsWith('#')) break
-
-        if (isListItem(line)) {
-            lines << line.substring(2)
-            if (lines.size() == MAX_NEXT_STEPS) break
-        }
-    }
-    return lines
 }
 
 private static boolean isListItem(String line) {
@@ -250,9 +248,7 @@ private static boolean isListItem(String line) {
 }
 
 private static void applyNextSteps(node, List<String> lines) {
-    for (child in node.getChildren()) {
-        child.delete()
-    }
+    deleteChildren(node)
     for (line in lines) {
         node.createChild().text = line
     }

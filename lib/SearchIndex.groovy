@@ -1,3 +1,5 @@
+import groovy.io.FileType
+import groovy.io.FileVisitResult
 import groovy.transform.Field
 
 import org.apache.lucene.analysis.Analyzer
@@ -14,16 +16,18 @@ import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field.Store
+import org.apache.lucene.document.StoredField
 import org.apache.lucene.document.StringField
 import org.apache.lucene.document.TextField
 import org.apache.lucene.index.DirectoryReader
 import org.apache.lucene.index.IndexWriter
 import org.apache.lucene.index.IndexWriterConfig
 import org.apache.lucene.index.Term
-import org.apache.lucene.search.BooleanClause
+import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.search.BooleanQuery
 import org.apache.lucene.search.BoostQuery
 import org.apache.lucene.search.IndexSearcher
+import org.apache.lucene.search.Query
 import org.apache.lucene.search.highlight.Highlighter
 import org.apache.lucene.search.highlight.QueryScorer
 import org.apache.lucene.search.highlight.SimpleFragmenter
@@ -49,7 +53,7 @@ import org.apache.poi.extractor.ExtractorFactory
 // tokens no longer match; updateIndex() then rebuilds the index from scratch
 // instead of incrementally. SearchIndexSpec pins the current tokenization, so
 // forgetting the bump fails the build.
-@Field static final int INDEX_SCHEMA_VERSION = 1
+@Field static final int INDEX_SCHEMA_VERSION = 2
 
 @Field private static final String LUCENE_SUBDIR_NAME = 'lucene'
 @Field private static final String META_FILE_NAME = 'files.meta'
@@ -58,6 +62,9 @@ import org.apache.poi.extractor.ExtractorFactory
 @Field private static final String FIELD_PATH = 'path'
 @Field static final String FIELD_FILENAME = 'filename'
 @Field static final String FIELD_CONTENT = 'content'
+// The leading part of the content, stored for snippets; FIELD_CONTENT itself is
+// only indexed, so a search never has to load a whole document per hit.
+@Field private static final String FIELD_PREVIEW = 'preview'
 // A file whose name matches ranks above one that merely mentions the keyword.
 @Field private static final Map<String, Float> SEARCH_FIELD_BOOSTS = [(FIELD_FILENAME): 2.0f, (FIELD_CONTENT): 1.0f]
 
@@ -71,6 +78,8 @@ import org.apache.poi.extractor.ExtractorFactory
 
 // Keeps one pathological file (e.g. a huge PDF) from blowing up the index.
 @Field private static final int MAX_CONTENT_CHARS = 2_000_000
+// As far into the content as the highlighter looks for a match anyway.
+@Field private static final int PREVIEW_CHARS = Highlighter.DEFAULT_MAX_CHARS_TO_ANALYZE
 @Field private static final int SNIPPET_CHARS = 160
 @Field private static final int DEFAULT_MAX_RESULTS = 100
 
@@ -125,14 +134,30 @@ def static String extractText(File file) {
  * are (re-)extracted, deleted files are dropped, unmodified files are left
  * alone. Rebuilds everything when the on-disk schema version is stale. A
  * no-op when another update currently holds the index lock.
+ *
+ * The file walk and the diff against files.meta come first, so the common
+ * "nothing changed" run never touches Lucene at all (this runs every few
+ * minutes from init.groovy, in a class loader that has to load it first).
  */
 def static void updateIndex(File docDir) {
-    def indexDir = new File(docDir, INDEX_DIR_NAME)
-    def luceneDir = new File(indexDir, LUCENE_SUBDIR_NAME)
-    luceneDir.mkdirs()
-    def metaFile = new File(indexDir, META_FILE_NAME)
+    def metaFile = new File(new File(docDir, INDEX_DIR_NAME), META_FILE_NAME)
+    def meta = loadMeta(metaFile)
+    def schemaChanged = meta.version != INDEX_SCHEMA_VERSION
+    Map<String, Long> knownMTimes = schemaChanged ? [:] : meta.mtimes
 
-    FSDirectory.open(luceneDir.toPath()).withCloseable { directory ->
+    Map<String, Long> currentMTimes = [:]
+    Map<String, File> changedFiles = [:]
+    eachIndexableFile(docDir) { file, relPath ->
+        def mtime = file.lastModified()
+        currentMTimes[relPath] = mtime
+        if (knownMTimes[relPath] != mtime) changedFiles[relPath] = file
+    }
+    def deletedPaths = knownMTimes.keySet() - currentMTimes.keySet()
+    def indexDir = luceneDir(docDir)
+    if (!schemaChanged && !changedFiles && !deletedPaths && indexDir.isDirectory()) return
+
+    indexDir.mkdirs()
+    FSDirectory.open(indexDir.toPath()).withCloseable { directory ->
         IndexWriter writer
         try {
             writer = new IndexWriter(directory, new IndexWriterConfig(sharedAnalyzer()))
@@ -140,37 +165,20 @@ def static void updateIndex(File docDir) {
             return
         }
 
-        def meta = loadMeta(metaFile)
-        def schemaChanged = meta.version != INDEX_SCHEMA_VERSION
-        Map<String, Long> knownMTimes = schemaChanged ? [:] : meta.mtimes
-        def seenPaths = new HashSet<String>()
-
         writer.withCloseable {
             if (schemaChanged) writer.deleteAll()
 
-            eachIndexableFile(docDir) { file, relPath ->
-                seenPaths << relPath
-                def mtime = file.lastModified()
-                if (knownMTimes[relPath] == mtime) return
-
-                def doc = new Document()
-                doc.add(new StringField(FIELD_PATH, relPath, Store.YES))
-                doc.add(new TextField(FIELD_FILENAME, file.name, Store.YES))
-                doc.add(new TextField(FIELD_CONTENT, extractText(file), Store.YES))
-                writer.updateDocument(new Term(FIELD_PATH, relPath), doc)
-                knownMTimes[relPath] = mtime
+            changedFiles.each { relPath, file ->
+                writer.updateDocument(new Term(FIELD_PATH, relPath), toDocument(file, relPath))
             }
-
-            (knownMTimes.keySet() - seenPaths).each { relPath ->
+            deletedPaths.each { relPath ->
                 writer.deleteDocuments(new Term(FIELD_PATH, relPath))
-                knownMTimes.remove(relPath)
             }
-
             writer.commit()
         }
 
         // After the commit only, so an interrupted run is redone in full next time.
-        saveMeta(metaFile, knownMTimes)
+        saveMeta(metaFile, currentMTimes)
     }
 }
 
@@ -180,23 +188,25 @@ def static void updateIndex(File docDir) {
  * when the index doesn't exist yet or no keyword tokenizes to anything.
  */
 def static List<SearchHit> search(File docDir, String queryText, int maxResults = DEFAULT_MAX_RESULTS) {
-    def keywords = queryText?.trim() ? queryText.trim().split(/\s+/) as List : []
+    def keywords = queryText?.tokenize() ?: []
     if (!keywords) return []
 
-    def luceneDir = new File(new File(docDir, INDEX_DIR_NAME), LUCENE_SUBDIR_NAME)
-    if (!luceneDir.exists()) return []
+    def indexDir = luceneDir(docDir)
+    if (!indexDir.exists()) return []
 
-    def analyzer = sharedAnalyzer()
-    def query = andQuery(analyzer, keywords)
+    def query = andQuery(keywords)
     if (!query) return []
+
+    def highlighter = new Highlighter(new SimpleHTMLFormatter('', ''), new QueryScorer(query))
+    highlighter.textFragmenter = new SimpleFragmenter(SNIPPET_CHARS)
 
     // A reader per search costs milliseconds on a personal-sized index and always
     // sees the latest commit.
-    return FSDirectory.open(luceneDir.toPath()).withCloseable { directory ->
+    return FSDirectory.open(indexDir.toPath()).withCloseable { directory ->
         DirectoryReader.open(directory).withCloseable { reader ->
             def searcher = new IndexSearcher(reader)
             searcher.search(query, maxResults).scoreDocs.collect { scoreDoc ->
-                toHit(searcher.doc(scoreDoc.doc), query, analyzer, docDir)
+                toHit(searcher.doc(scoreDoc.doc), highlighter, docDir)
             }
         }
     }
@@ -265,6 +275,20 @@ private static Analyzer newJapaneseAnalyzer(boolean forFilename) {
     }
 }
 
+private static File luceneDir(File docDir) {
+    return new File(new File(docDir, INDEX_DIR_NAME), LUCENE_SUBDIR_NAME)
+}
+
+private static Document toDocument(File file, String relPath) {
+    def text = extractText(file)
+    def doc = new Document()
+    doc.add(new StringField(FIELD_PATH, relPath, Store.YES))
+    doc.add(new TextField(FIELD_FILENAME, file.name, Store.YES))
+    doc.add(new TextField(FIELD_CONTENT, text, Store.NO))
+    doc.add(new StoredField(FIELD_PREVIEW, text.take(PREVIEW_CHARS)))
+    return doc
+}
+
 private static String extensionOf(String name) {
     def dot = name.lastIndexOf('.')
     return dot < 0 ? '' : name.substring(dot + 1).toLowerCase()
@@ -289,78 +313,56 @@ private static String readOfficeText(File file) {
 
 /** Visits every regular file under docDir, skipping dot-directories (the index itself, .git, ...). */
 private static void eachIndexableFile(File docDir, Closure action) {
-    walkFiles(docDir, docDir.toPath(), action)
-}
-
-private static void walkFiles(File dir, java.nio.file.Path base, Closure action) {
-    dir.eachFile { f ->
-        if (f.isDirectory()) {
-            if (f.name.startsWith('.')) return
-            walkFiles(f, base, action)
-        } else if (f.isFile()) {
-            def relPath = base.relativize(f.toPath()).toString().replace(File.separator, '/')
-            action(f, relPath)
-        }
+    def base = docDir.toPath()
+    def skipDotDirs = { File dir -> dir.name.startsWith('.') ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE }
+    docDir.traverse(type: FileType.FILES, preDir: skipDotDirs) { File file ->
+        action(file, base.relativize(file.toPath()).toString().replace(File.separator, '/'))
     }
-}
-
-/** Every keyword must match (AND); a keyword matches in either field (OR, boosted). */
-private static andQuery(analyzer, List<String> keywords) {
-    def builder = new BooleanQuery.Builder()
-    def any = false
-    keywords.each { keyword ->
-        def clause = orAcrossFieldsQuery(analyzer, keyword)
-        if (clause) {
-            builder.add(clause, BooleanClause.Occur.MUST)
-            any = true
-        }
-    }
-    return any ? builder.build() : null
-}
-
-private static orAcrossFieldsQuery(analyzer, String keyword) {
-    def builder = new BooleanQuery.Builder()
-    def any = false
-    SEARCH_FIELD_BOOSTS.each { field, boost ->
-        def fieldQuery = fieldQueryFor(analyzer, field, keyword, boost)
-        if (fieldQuery) {
-            builder.add(fieldQuery, BooleanClause.Occur.SHOULD)
-            any = true
-        }
-    }
-    return any ? builder.build() : null
 }
 
 /**
- * The keyword's tokens as a phrase (TermQuery for one token, PhraseQuery for
- * several, null for none), so "検索機能" matches "検索機能" but not text that
- * merely contains 検索 and 機能 somewhere.
+ * Every keyword must match (AND); a keyword matches in either field (OR,
+ * boosted). A keyword's tokens form a phrase (TermQuery for one token,
+ * PhraseQuery for several), so "検索機能" matches "検索機能" but not text that
+ * merely contains 検索 and 機能 somewhere. Null when nothing tokenizes.
  */
-private static fieldQueryFor(analyzer, String field, String keyword, float boost) {
-    def query = new QueryBuilder(analyzer).createPhraseQuery(field, keyword)
-    return query ? new BoostQuery(query, boost) : null
+private static Query andQuery(List<String> keywords) {
+    def builder = new QueryBuilder(sharedAnalyzer())
+    def keywordQueries = keywords.collect { keyword ->
+        booleanQuery(Occur.SHOULD, SEARCH_FIELD_BOOSTS.collect { field, boost ->
+            def phrase = builder.createPhraseQuery(field, keyword)
+            phrase ? new BoostQuery(phrase, boost) : null
+        })
+    }
+    return booleanQuery(Occur.MUST, keywordQueries)
 }
 
-private static SearchHit toHit(Document doc, query, analyzer, File docDir) {
+/** Combines the non-null clauses with the given occurrence; null when there is none. */
+private static Query booleanQuery(Occur occur, List<Query> clauses) {
+    def present = clauses.findAll()
+    if (!present) return null
+    def builder = new BooleanQuery.Builder()
+    present.each { builder.add(it, occur) }
+    return builder.build()
+}
+
+private static SearchHit toHit(Document doc, Highlighter highlighter, File docDir) {
     def relPath = doc.get(FIELD_PATH)
-    def content = doc.get(FIELD_CONTENT) ?: ''
     return new SearchHit(
             file: new File(docDir, relPath),
             relativePath: relPath,
-            snippet: bestSnippet(query, analyzer, content))
+            snippet: bestSnippet(highlighter, doc.get(FIELD_PREVIEW) ?: ''))
 }
 
-private static String bestSnippet(query, analyzer, String content) {
-    if (!content) return ''
+private static String bestSnippet(Highlighter highlighter, String preview) {
+    if (!preview) return ''
     try {
-        def highlighter = new Highlighter(new SimpleHTMLFormatter('', ''), new QueryScorer(query))
-        highlighter.textFragmenter = new SimpleFragmenter(SNIPPET_CHARS)
-        def fragment = highlighter.getBestFragment(analyzer, FIELD_CONTENT, content)
+        def fragment = highlighter.getBestFragment(sharedAnalyzer(), FIELD_CONTENT, preview)
         if (fragment) return fragment.trim()
     } catch (Exception ignored) {
         // Best effort; fall through to a plain preview.
     }
-    return content.length() > SNIPPET_CHARS ? content.substring(0, SNIPPET_CHARS) + '…' : content
+    return preview.length() > SNIPPET_CHARS ? preview.substring(0, SNIPPET_CHARS) + '…' : preview
 }
 
 /** [version: int, mtimes: Map]; version is -1 (never a real version) when the file is missing or unreadable. */
@@ -374,7 +376,7 @@ private static Map loadMeta(File metaFile) {
 
     meta.version = version as int
     lines.drop(1).each { line ->
-        def (mtime, relPath) = line.split('\t', 2) as List
+        def (mtime, relPath) = line.tokenize('\t')
         if (relPath && mtime.isLong()) meta.mtimes[relPath] = mtime as Long
     }
     return meta

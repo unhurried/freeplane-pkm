@@ -30,35 +30,26 @@ class SearchIndexSpec extends Specification {
 
     private File pdfFile(String name, String text) {
         def file = new File(docDir, name)
-        def doc = new PDDocument()
-        try {
+        new PDDocument().withCloseable { doc ->
             def page = new PDPage()
             doc.addPage(page)
-            def cs = new PDPageContentStream(doc, page)
-            try {
+            new PDPageContentStream(doc, page).withCloseable { cs ->
                 cs.beginText()
                 cs.setFont(PDType1Font.HELVETICA, 12)
                 cs.newLineAtOffset(50, 700)
                 cs.showText(text)
                 cs.endText()
-            } finally {
-                cs.close()
             }
             doc.save(file)
-        } finally {
-            doc.close()
         }
         return file
     }
 
     private File docxFile(String name, String text) {
         def file = new File(docDir, name)
-        def doc = new XWPFDocument()
-        try {
+        new XWPFDocument().withCloseable { doc ->
             doc.createParagraph().createRun().setText(text)
             file.withOutputStream { doc.write(it) }
-        } finally {
-            doc.close()
         }
         return file
     }
@@ -303,9 +294,9 @@ class SearchIndexSpec extends Specification {
     // Pins the tokenization an existing on-disk index was built with. If this
     // fails because the analyzer changed on purpose, bump INDEX_SCHEMA_VERSION
     // (so users' indexes get rebuilt) and update the expected tokens together.
-    def "the indexed tokens are unchanged for schema version 1"() {
+    def "the indexed tokens are unchanged for schema version 2"() {
         expect:
-        SearchIndex.INDEX_SCHEMA_VERSION == 1
+        SearchIndex.INDEX_SCHEMA_VERSION == 2
         SearchIndex.tokenize(SearchIndex.FIELD_CONTENT, '東京都で本を読んだ。Ｃｏｍｐｕｔｅｒ コンピューター QuarterlyReport2024') ==
                 ['東京', '都', 'で', '本', 'を', '読む', 'だ', 'computer', 'コンピュータ', 'quarterlyreport', '2024']
         SearchIndex.tokenize(SearchIndex.FIELD_FILENAME, 'QuarterlyReport2024.md 関西国際空港') ==
@@ -375,21 +366,19 @@ class SearchIndexSpec extends Specification {
         SearchIndex.search(docDir, SearchIndex.INDEX_DIR_NAME) == []
     }
 
-    def "search sees index updates made after an earlier search"() {
+    def "updateIndex is a no-op when no file changed since the last run"() {
         given:
-        def file = textFile('Alpha.md', 'first version')
-        file.setLastModified(1000L)
+        textFile('Alpha.md', 'mountains')
         SearchIndex.updateIndex(docDir)
-        assert SearchIndex.search(docDir, 'first').size() == 1
+        def metaFile = new File(docDir, "${SearchIndex.INDEX_DIR_NAME}/files.meta")
+        metaFile.setLastModified(1000L)
 
         when:
-        file.text = 'second version'
-        file.setLastModified(2000L)
         SearchIndex.updateIndex(docDir)
 
-        then:
-        SearchIndex.search(docDir, 'first') == []
-        SearchIndex.search(docDir, 'second').size() == 1
+        then: 'files.meta is not even rewritten'
+        metaFile.lastModified() == 1000L
+        SearchIndex.search(docDir, 'mountains').size() == 1
     }
 
     def "search answers from the document directory it is given"() {

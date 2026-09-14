@@ -95,16 +95,11 @@ test {
     // the JUnit listener throw mid-report and records the test as skipped, leaving
     // the build green. Nothing here is meant to be skipped.
     def skippedTests = []
-    addTestListener(new TestListener() {
-        void beforeSuite(TestDescriptor suite) {}
-        void afterSuite(TestDescriptor suite, TestResult result) {}
-        void beforeTest(TestDescriptor testDescriptor) {}
-        void afterTest(TestDescriptor descriptor, TestResult result) {
-            if (result.resultType == TestResult.ResultType.SKIPPED) {
-                skippedTests << "${descriptor.className}.${descriptor.name}"
-            }
+    afterTest { descriptor, result ->
+        if (result.resultType == TestResult.ResultType.SKIPPED) {
+            skippedTests << "${descriptor.className}.${descriptor.name}"
         }
-    })
+    }
     doLast {
         if (skippedTests) {
             throw new GradleException("Tests were skipped instead of run: ${skippedTests.join(', ')}")

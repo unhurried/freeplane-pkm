@@ -1,6 +1,8 @@
 import spock.lang.Specification
 import spock.lang.TempDir
 
+import org.codehaus.groovy.runtime.InvokerHelper
+
 import javax.swing.JOptionPane
 import java.nio.file.Path
 
@@ -13,10 +15,11 @@ import java.nio.file.Path
  * lib/ is the main source set, so Utils/SearchIndex resolve from the test
  * classpath exactly as they resolve from the add-on's jar at runtime.
  *
- * The fakes are Expando-based, like UtilsSpec's, and cover only the slice of
- * Freeplane's node/controller/UI API the scripts actually touch. Dialogs are
- * scripted through inputAnswers/confirmAnswer, and everything a script would
- * show or open is recorded (errorMessages, openedInDesktop) for assertions.
+ * Nodes are FakeNode instances; the controller, UI and map are acyclic Expandos.
+ * Together they cover only the slice of Freeplane's node/controller/UI API the
+ * scripts actually touch. Dialogs are scripted through inputAnswers/confirmAnswer,
+ * and everything a script would show or open is recorded (errorMessages,
+ * openedInDesktop) for assertions. UtilsSpec builds on the same fixture.
  *
  * Scripts that only delegate to Freeplane internals (FoldOneLevel,
  * UnfoldOneLevel, init/init.groovy) import org.freeplane.* classes
@@ -87,7 +90,6 @@ abstract class ScriptSpec extends Specification {
     FakeNode createNode(Map props = [:]) {
         def node = new FakeNode()
         node.text = props.text ?: ''
-        if (props.plainText) node.plainText = props.plainText
         node.link.file = props.linkFile
         node.link.node = props.linkNode
         node.mindMap = mindMap
@@ -125,10 +127,9 @@ abstract class ScriptSpec extends Specification {
     /** The BOM character the page-writing scripts prepend, spelled out to stay visible in source. */
     static final String BOM_CHAR = Character.toString((char) 0xFEFF)
 
-    /** Reads a document directory file, dropping the UTF-8 BOM the scripts write. */
+    /** Reads a document directory file, dropping the UTF-8 BOM the scripts write (checked separately by hasBom). */
     String readPage(String name) {
-        def text = new File(docDir, name + '.md').getText('UTF-8')
-        return text.startsWith(BOM_CHAR) ? text.substring(1) : text
+        return Utils.readPage(new File(docDir, name + '.md'))
     }
 
     boolean hasBom(String name) {
@@ -138,8 +139,13 @@ abstract class ScriptSpec extends Specification {
 
     // --- Running the script under test ---
 
+    /** Each script is compiled once per test JVM; every feature method then runs a fresh instance of it. */
+    private static final Map<String, Class> SCRIPT_CLASSES = [:]
+
     def runScript(String scriptName, node) {
-        def bindings = new Binding([node: node, c: c, ui: ui])
-        new GroovyShell(this.class.classLoader, bindings).evaluate(new File('scripts', scriptName))
+        def scriptClass = SCRIPT_CLASSES.computeIfAbsent(scriptName) { name ->
+            new GroovyShell(ScriptSpec.classLoader).parse(new File('scripts', name)).class
+        }
+        InvokerHelper.createScript(scriptClass, new Binding([node: node, c: c, ui: ui])).run()
     }
 }
