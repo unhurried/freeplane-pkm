@@ -69,12 +69,10 @@ def dialogName = "freeplane-pkm-search|${mapId}|${docDir.absolutePath}".toString
 
 // Freeplane compiles and runs every menu script invocation with its own script
 // class loader over the add-on's lib jar, so opening a second dialog would
-// build a second copy of the entire search stack - Lucene, and Kuromoji's
-// bundled dictionary above all - paying its class loading and dictionary load
-// again while the previous copy stays on the heap. Re-showing the window that
-// is already open reuses the copy that is already warm instead, which is what
-// keeps a reopened dialog's first search as fast as its second one; this
-// script then only resolves the document directory and hands the window back.
+// load Lucene and Kuromoji's bundled dictionary all over again while the
+// previous copy stays on the heap. Re-showing the window that is already open
+// reuses the copy that is already warm instead; this script then only
+// resolves the document directory and hands the window back.
 def existingDialog = null
 try {
     existingDialog = owner?.ownedWindows?.find { window ->
@@ -284,18 +282,16 @@ content.add(statusPanel, BorderLayout.SOUTH)
 // works against whatever is currently on disk while this runs, and simply may
 // miss the most recent changes until it finishes.
 //
-// warmUp() runs first, deliberately: it does the one-off initialization (the
-// analyzer with its Kuromoji dictionary, and the index reader) that a search
-// would otherwise have to do *while competing with this very refresh* for it,
-// which is what made the first query after opening the dialog several times
-// slower than the next one.
+// warmUp() loads the Kuromoji dictionary here, on this background thread,
+// rather than leaving it to the user's first query (an up-to-date index gives
+// updateIndex() nothing to tokenize, so it wouldn't load it either).
 def indexRefreshInProgress = new AtomicBoolean(false)
 def refreshIndex = {
     if (!indexRefreshInProgress.compareAndSet(false, true)) return
     statusLabel.text = UPDATING_INDEX_STATUS
     Thread.start {
         try {
-            SearchIndex.warmUp(docDir)
+            SearchIndex.warmUp()
             SearchIndex.updateIndex(docDir)
         } catch (Exception ignored) {
             // Best effort - a failed background refresh should not block searching.

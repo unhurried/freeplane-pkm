@@ -11,8 +11,6 @@ import org.apache.lucene.analysis.ja.JapaneseKatakanaStemFilter
 import org.apache.lucene.analysis.ja.JapaneseTokenizer
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper
 import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter
-import org.apache.lucene.analysis.tokenattributes.CharTermAttribute
-import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.document.StringField
@@ -25,13 +23,12 @@ import org.apache.lucene.search.BooleanClause
 import org.apache.lucene.search.BooleanQuery
 import org.apache.lucene.search.BoostQuery
 import org.apache.lucene.search.IndexSearcher
-import org.apache.lucene.search.PhraseQuery
-import org.apache.lucene.search.TermQuery
 import org.apache.lucene.search.highlight.Highlighter
 import org.apache.lucene.search.highlight.QueryScorer
 import org.apache.lucene.search.highlight.SimpleFragmenter
 import org.apache.lucene.search.highlight.SimpleHTMLFormatter
 import org.apache.lucene.store.FSDirectory
+import org.apache.lucene.util.QueryBuilder
 
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.text.PDFTextStripper
@@ -48,9 +45,8 @@ import org.apache.poi.extractor.ExtractorFactory
 // itself - is what makes updateIndex() incremental (an unmodified file is
 // neither re-extracted nor re-added on the next call).
 //
-// The analyzer and the index reader are expensive to build and are therefore
-// cached for the lifetime of the class rather than per call; warmUp() builds
-// them ahead of the first query. See SEARCH_CACHE_LOCK below.
+// The analyzer is shared for the lifetime of the class (see sharedAnalyzer),
+// and warmUp() forces its one-off dictionary load ahead of the first query.
 
 @Field static final String INDEX_DIR_NAME = '.search-index'
 
@@ -74,18 +70,11 @@ import org.apache.poi.extractor.ExtractorFactory
 // name matches a keyword tends to rank above a file that merely mentions it.
 @Field private static final Map<String, Float> SEARCH_FIELD_BOOSTS = [(FIELD_FILENAME): 2.0f, (FIELD_CONTENT): 1.0f]
 
-// Guards the cached analyzer/reader below. They are shared, JVM-wide state:
-// building the analyzer loads Kuromoji's bundled IPADIC dictionary (a few
-// hundred milliseconds and several MB of heap per instance) and opening a
-// DirectoryReader re-reads the index's segment files, so building either per
-// call made every single query pay a cold start.
-@Field private static final Object SEARCH_CACHE_LOCK = new Object()
+// Built once per class (see sharedAnalyzer): JapaneseTokenizer loads
+// Kuromoji's bundled IPADIC dictionary on first use - a few hundred
+// milliseconds and several MB of heap - and there is no reason to have more
+// than one analyzer chain around.
 @Field private static Analyzer cachedAnalyzer
-@Field private static FSDirectory cachedDirectory
-@Field private static DirectoryReader cachedReader
-// Absolute path the cached reader was opened on, so that pointing searches at
-// a different document directory reopens instead of answering from the old one.
-@Field private static String cachedReaderPath
 
 // Analyzed by warmUp() purely to force the analyzer chain (JapaneseTokenizer
 // and its dictionary above all) to initialize; the text itself is irrelevant,
@@ -251,59 +240,38 @@ def static List<SearchHit> search(File docDir, String queryText, int maxResults 
     def query = andQuery(analyzer, keywords)
     if (!query) return []
 
-    def reader = acquireReader(luceneDir)
-    try {
-        def searcher = new IndexSearcher(reader)
-        return searcher.search(query, maxResults).scoreDocs.collect { scoreDoc ->
-            toHit(searcher.doc(scoreDoc.doc), query, analyzer, docDir)
+    // Opened per search: a personal document directory's index is small
+    // enough that this costs milliseconds, and it guarantees the search sees
+    // the latest commit without any reader-refresh bookkeeping.
+    return FSDirectory.open(luceneDir.toPath()).withCloseable { directory ->
+        DirectoryReader.open(directory).withCloseable { reader ->
+            def searcher = new IndexSearcher(reader)
+            searcher.search(query, maxResults).scoreDocs.collect { scoreDoc ->
+                toHit(searcher.doc(scoreDoc.doc), query, analyzer, docDir)
+            }
         }
-    } finally {
-        reader.decRef()
     }
 }
 
 /**
- * Pre-loads what a search needs but does not have yet: the analyzer - whose
- * JapaneseTokenizer reads Kuromoji's bundled IPADIC dictionary on first use -
- * and, when the index already exists, the index reader.
+ * Forces the analyzer's one-off initialization - JapaneseTokenizer reading
+ * Kuromoji's bundled IPADIC dictionary - ahead of the first query.
  *
- * Search.groovy calls this before kicking off its background index refresh so
- * that the two don't race for the same one-off initialization. Without it, a
- * query typed while that refresh is still running blocks on the dictionary's
- * class initialization (held by the refresh thread) and takes several times
- * longer than the same query a moment later - which is exactly how the
- * "searching is slow while the index is being updated" symptom arises.
+ * Search.groovy calls this from its background index refresh, because an
+ * already up-to-date index gives updateIndex() nothing to tokenize, which
+ * would leave the dictionary load to the user's first query instead.
  *
  * Best effort by design: whatever fails here is simply initialized again - and
- * its failure reported - by the search or index update that actually needs it.
- * Catches Throwable rather than Exception for the reason extractText()
- * documents: a failing static initializer surfaces as an Error, not an
- * Exception, and must not take down the caller's thread.
+ * its failure reported - by the search that actually needs it. Catches
+ * Throwable rather than Exception for the reason extractText() documents: a
+ * failing static initializer surfaces as an Error, not an Exception, and must
+ * not take down the caller's thread.
  */
-def static void warmUp(File docDir) {
+def static void warmUp() {
     try {
-        def analyzer = sharedAnalyzer()
-        tokensOf(analyzer, FIELD_CONTENT, WARM_UP_TEXT)
-        tokensOf(analyzer, FIELD_FILENAME, WARM_UP_TEXT)
-        def luceneDir = luceneDirOf(docDir)
-        if (luceneDir.exists()) acquireReader(luceneDir).decRef()
+        new QueryBuilder(sharedAnalyzer()).createPhraseQuery(FIELD_CONTENT, WARM_UP_TEXT)
     } catch (Throwable ignored) {
         // Best effort - see above.
-    }
-}
-
-/**
- * Closes the cached index reader and the directory it reads through,
- * releasing the index files they keep open (memory-mapped, on most
- * platforms). The next search transparently opens a new reader, so this is
- * only for a caller that needs those files released at a specific moment -
- * e.g. a test about to delete its temporary index directory. Searching a
- * different document directory needs no call: the cache keys on the index
- * path and reopens itself.
- */
-def static void releaseCachedReader() {
-    synchronized (SEARCH_CACHE_LOCK) {
-        closeCachedReaderLocked()
     }
 }
 
@@ -319,67 +287,9 @@ private static File luceneDirOf(File docDir) {
  * not take ownership of the analyzer it is configured with, so one instance
  * can safely serve the background index update and a concurrent search.
  */
-private static Analyzer sharedAnalyzer() {
-    synchronized (SEARCH_CACHE_LOCK) {
-        if (cachedAnalyzer == null) cachedAnalyzer = newAnalyzer()
-        return cachedAnalyzer
-    }
-}
-
-/**
- * Returns the cached reader - refreshed to the newest commit, so a search
- * still sees everything updateIndex() has written - with its reference count
- * incremented; the caller must decRef() it when done.
- *
- * Reference counting rather than close() is what makes that refresh safe:
- * replacing the cached reader only drops the cache's own reference, so a
- * search still reading through the previous one keeps a valid view until it
- * releases it.
- */
-private static DirectoryReader acquireReader(File luceneDir) {
-    synchronized (SEARCH_CACHE_LOCK) {
-        def path = luceneDir.absolutePath
-        if (cachedReader != null && cachedReaderPath != path) closeCachedReaderLocked()
-        if (cachedReader != null) {
-            try {
-                def refreshed = DirectoryReader.openIfChanged(cachedReader)
-                if (refreshed != null) {
-                    cachedReader.decRef()
-                    cachedReader = refreshed
-                }
-            } catch (Exception ignored) {
-                // The index was replaced wholesale (or is momentarily
-                // unreadable); drop the stale view and open a fresh one below.
-                closeCachedReaderLocked()
-            }
-        }
-        if (cachedReader == null) {
-            cachedDirectory = FSDirectory.open(luceneDir.toPath())
-            cachedReader = DirectoryReader.open(cachedDirectory)
-            cachedReaderPath = path
-        }
-        cachedReader.incRef()
-        return cachedReader
-    }
-}
-
-// Must be called while holding SEARCH_CACHE_LOCK. Closing the directory here
-// is why: a reader another thread is still using reads through it, and only
-// the lock keeps that from overlapping with a document directory switch.
-private static void closeCachedReaderLocked() {
-    try {
-        cachedReader?.decRef()
-    } catch (Exception ignored) {
-        // Already released - nothing left to close.
-    }
-    try {
-        cachedDirectory?.close()
-    } catch (Exception ignored) {
-        // Same.
-    }
-    cachedReader = null
-    cachedDirectory = null
-    cachedReaderPath = null
+private static synchronized Analyzer sharedAnalyzer() {
+    if (cachedAnalyzer == null) cachedAnalyzer = newAnalyzer()
+    return cachedAnalyzer
 }
 
 // schema-region:begin - analyzer construction
@@ -521,46 +431,19 @@ private static orAcrossFieldsQuery(analyzer, String keyword) {
     return any ? builder.build() : null
 }
 
-private static fieldQueryFor(analyzer, String field, String keyword, float boost) {
-    def tokens = tokensOf(analyzer, field, keyword)
-    if (!tokens) return null
-    if (tokens.size() == 1) return new BoostQuery(new TermQuery(new Term(field, tokens[0].text)), boost)
-
-    // A keyword that tokenizes to several tokens - CJK text split into
-    // multiple words by JapaneseTokenizer, or a filename fragment split on a
-    // case/digit boundary by WordDelimiterGraphFilter - is required to match
-    // as a contiguous phrase, at the same relative positions the analyzer
-    // produced, so e.g. "検索機能" ("search function") matches "検索機能" but
-    // not unrelated text that merely contains both of its words somewhere
-    // else in the field.
-    def phrase = new PhraseQuery.Builder()
-    tokens.each { token -> phrase.add(new Term(field, token.text), token.position) }
-    return new BoostQuery(phrase.build(), boost)
-}
-
 /**
- * Runs text through the given field's analyzer, returning each token's text
- * together with its position - accumulated from PositionIncrementAttribute
- * rather than assumed to advance by exactly one per token, since that does
- * not hold for every analyzer/filter (e.g. a synonym-like filter could emit
- * more than one token at the same position). Positions are what
- * fieldQueryFor() needs to build a phrase query that only matches the
- * analyzer's actual token layout.
+ * Analyzes the keyword with the field's analyzer and requires the resulting
+ * tokens to match as a contiguous phrase (QueryBuilder yields a TermQuery for
+ * a single token, a PhraseQuery for several, and null for none). So a keyword
+ * that tokenizes to several tokens - CJK text split into words by
+ * JapaneseTokenizer, or a filename fragment split on a case/digit boundary by
+ * WordDelimiterGraphFilter - e.g. "検索機能" ("search function") matches
+ * "検索機能" but not unrelated text that merely contains both of its words
+ * somewhere else in the field.
  */
-private static List<Map> tokensOf(analyzer, String field, String text) {
-    def tokens = []
-    def tokenStream = analyzer.tokenStream(field, text)
-    def termAttr = tokenStream.addAttribute(CharTermAttribute)
-    def posAttr = tokenStream.addAttribute(PositionIncrementAttribute)
-    tokenStream.reset()
-    def position = -1
-    while (tokenStream.incrementToken()) {
-        position += posAttr.positionIncrement
-        tokens << [text: termAttr.toString(), position: position]
-    }
-    tokenStream.end()
-    tokenStream.close()
-    return tokens
+private static fieldQueryFor(analyzer, String field, String keyword, float boost) {
+    def query = new QueryBuilder(analyzer).createPhraseQuery(field, keyword)
+    return query ? new BoostQuery(query, boost) : null
 }
 
 private static SearchHit toHit(Document doc, query, analyzer, File docDir) {
