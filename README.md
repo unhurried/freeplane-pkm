@@ -17,7 +17,6 @@ Freeplane PKM is a project for building a personal knowledge management (PKM) sy
 
 The scripts are available under Tools → Scripts → Freeplane PKM, with the keyboard shortcuts below assigned automatically.
 
-<!-- shortcuts:begin (generated from addonScriptDefs in gradle/packageAddon.gradle) -->
 | Shortcut | Menu entry |
 | --- | --- |
 | F1 | Open |
@@ -32,7 +31,6 @@ The scripts are available under Tools → Scripts → Freeplane PKM, with the ke
 | F10 | New Directory |
 | F11 | Delete |
 | F12 | Update Next Steps and Search Index |
-<!-- shortcuts:end -->
 
 ## Full-Text Document Search
 
@@ -57,7 +55,7 @@ Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a sea
 ```bash
 gradle build   # compile + check
 gradle test    # tests only
-gradle check   # tests + script syntax check + convention checks (tools/check-conventions.sh)
+gradle check   # tests + script syntax check + codenarc + tools/check-conventions.sh
 ```
 
 ### Packaging as a Freeplane Add-on

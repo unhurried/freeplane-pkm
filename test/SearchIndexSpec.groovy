@@ -291,12 +291,25 @@ class SearchIndexSpec extends Specification {
         assert SearchIndex.search(docDir, '機械学習').size() == 1
 
         when: 'the on-disk schema version is rolled back without touching any document'
-        def versionFile = new File(docDir, "${SearchIndex.INDEX_DIR_NAME}/index.version")
-        versionFile.text = '0'
+        def metaFile = new File(docDir, "${SearchIndex.INDEX_DIR_NAME}/files.meta")
+        metaFile.text = metaFile.text.replaceFirst(/version=\d+/, 'version=0')
         SearchIndex.updateIndex(docDir)
 
         then: 'the index is rebuilt from scratch and remains searchable'
         SearchIndex.search(docDir, '機械学習').size() == 1
+        metaFile.readLines()[0] == "version=${SearchIndex.INDEX_SCHEMA_VERSION}"
+    }
+
+    // Pins the tokenization an existing on-disk index was built with. If this
+    // fails because the analyzer changed on purpose, bump INDEX_SCHEMA_VERSION
+    // (so users' indexes get rebuilt) and update the expected tokens together.
+    def "the indexed tokens are unchanged for schema version 1"() {
+        expect:
+        SearchIndex.INDEX_SCHEMA_VERSION == 1
+        SearchIndex.tokenize(SearchIndex.FIELD_CONTENT, '東京都で本を読んだ。Ｃｏｍｐｕｔｅｒ コンピューター QuarterlyReport2024') ==
+                ['東京', '都', 'で', '本', 'を', '読む', 'だ', 'computer', 'コンピュータ', 'quarterlyreport', '2024']
+        SearchIndex.tokenize(SearchIndex.FIELD_FILENAME, 'QuarterlyReport2024.md 関西国際空港') ==
+                ['quarterly', 'report', '2024', 'md', '関西', '国際', '空港']
     }
 
     def "search returns no results for an unindexed document directory"() {
@@ -360,6 +373,51 @@ class SearchIndexSpec extends Specification {
 
         expect:
         SearchIndex.search(docDir, SearchIndex.INDEX_DIR_NAME) == []
+    }
+
+    def "search sees index updates made after an earlier search"() {
+        given:
+        def file = textFile('Alpha.md', 'first version')
+        file.setLastModified(1000L)
+        SearchIndex.updateIndex(docDir)
+        assert SearchIndex.search(docDir, 'first').size() == 1
+
+        when:
+        file.text = 'second version'
+        file.setLastModified(2000L)
+        SearchIndex.updateIndex(docDir)
+
+        then:
+        SearchIndex.search(docDir, 'first') == []
+        SearchIndex.search(docDir, 'second').size() == 1
+    }
+
+    def "search answers from the document directory it is given"() {
+        given:
+        textFile('Alpha.md', 'mountains')
+        SearchIndex.updateIndex(docDir)
+        def otherDocDir = tempDir.resolve('other-docs').toFile()
+        otherDocDir.mkdirs()
+        new File(otherDocDir, 'Beta.md').text = 'rivers'
+        SearchIndex.updateIndex(otherDocDir)
+
+        expect:
+        SearchIndex.search(docDir, 'mountains').size() == 1
+        SearchIndex.search(otherDocDir, 'rivers').size() == 1
+        SearchIndex.search(otherDocDir, 'mountains') == []
+        SearchIndex.search(docDir, 'rivers') == []
+    }
+
+    def "warmUp leaves the index searchable"() {
+        given:
+        textFile('Alpha.md', '機械学習の勉強をした。')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        SearchIndex.warmUp()
+
+        then:
+        SearchIndex.search(docDir, '機械学習').size() == 1
     }
 
     def "updateIndex is safe to call on an empty document directory"() {

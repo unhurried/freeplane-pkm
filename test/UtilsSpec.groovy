@@ -57,25 +57,6 @@ class UtilsSpec extends Specification {
         result == docDir
     }
 
-    def "loadDocDir supports legacy pageDirPath config key"() {
-        given:
-        def docDir = tempDir.resolve('pages').toFile()
-        docDir.mkdirs()
-        def docDirNode = createMockNode(plainText: docDir.absolutePath)
-        def configKeyNode = createMockNode(text: 'pageDirPath', children: [docDirNode])
-        def configNode = createMockNode(text: 'config', children: [configKeyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        def result = Utils.loadDocDir(node)
-
-        then:
-        result == docDir
-    }
-
     def "loadDocDir throws when config node is missing"() {
         given:
         def rootNode = createMockNode(children: [])
@@ -208,279 +189,6 @@ class UtilsSpec extends Specification {
         result == null
     }
 
-    // --- Tests for getPageFile ---
-
-    def "getPageFile returns file when valid page link"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'MyPage.md')
-        pageFile.createNewFile()
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def node = createMockNode(text: 'MyPage', linkFile: pageFile, mindMap: mindMap)
-
-        when:
-        def result = Utils.getPageFile(node)
-
-        then:
-        result == pageFile
-    }
-
-    def "getPageFile returns null when no linked file"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def node = createMockNode(text: 'NoLink', mindMap: mindMap)
-
-        when:
-        def result = Utils.getPageFile(node)
-
-        then:
-        result == null
-    }
-
-    def "getPageFile returns null when linked file does not match node text"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def otherFile = new File(docDir, 'Other.md')
-        otherFile.createNewFile()
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def node = createMockNode(text: 'MyPage', linkFile: otherFile, mindMap: mindMap)
-
-        when:
-        def result = Utils.getPageFile(node)
-
-        then:
-        result == null
-    }
-
-    def "getPageFile throws when page file is missing"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Missing.md')
-        // Don't create the file
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def node = createMockNode(text: 'Missing', linkFile: pageFile, mindMap: mindMap)
-
-        when:
-        Utils.getPageFile(node)
-
-        then:
-        def e = thrown(RuntimeException)
-        e.message == 'page file is missing.'
-    }
-
-    // --- Tests for updateNextSteps ---
-
-    def "updateNextSteps parses next steps from page file"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-[assets](Task.assets)
-
-## Contents
-
-### Next Steps
-
-* First step
-* Second step
-* Third step
-* Fourth step (should be ignored)
-
-## Journal
-"""
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def children = []
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> children }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node)
-
-        then:
-        new PollingConditions(timeout: 2).eventually {
-            children.size() == 3
-            children[0].text == 'First step'
-            children[1].text == 'Second step'
-            children[2].text == 'Third step'
-        }
-    }
-
-    def "updateNextSteps handles dash list items"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-- Step A
-- Step B
-"""
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def children = []
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> children }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node)
-
-        then:
-        new PollingConditions(timeout: 2).eventually {
-            children.size() == 2
-            children[0].text == 'Step A'
-            children[1].text == 'Step B'
-        }
-    }
-
-    def "updateNextSteps stops at next heading"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* Only step
-
-### Another Section
-
-* Should not appear
-"""
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def children = []
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> children }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node)
-
-        then:
-        new PollingConditions(timeout: 2).eventually {
-            children.size() == 1
-            children[0].text == 'Only step'
-        }
-    }
-
-    def "updateNextSteps does nothing when no page file linked"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def children = []
-        def node = createMockNode(text: 'NoPage', mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> children }
-
-        when:
-        Utils.updateNextSteps(node)
-
-        then:
-        children.size() == 0
-    }
-
-    // --- Tests for collectLinkedFiles ---
-
-    def "collectLinkedFiles returns all directly linked files in the tree"() {
-        given:
-        def fileA = tempDir.resolve('a.md').toFile()
-        def fileB = tempDir.resolve('b.md').toFile()
-        fileA.createNewFile()
-        fileB.createNewFile()
-        def childA = createMockNode(linkFile: fileA)
-        def childB = createMockNode(linkFile: fileB)
-        def root = createMockNode(children: [childA, childB])
-
-        when:
-        def result = Utils.collectLinkedFiles(root)
-
-        then:
-        result == [fileA.canonicalFile, fileB.canonicalFile] as Set
-    }
-
-    def "collectLinkedFiles collects files from deeply nested children"() {
-        given:
-        def file = tempDir.resolve('deep.md').toFile()
-        file.createNewFile()
-        def leaf = createMockNode(linkFile: file)
-        def middle = createMockNode(children: [leaf])
-        def root = createMockNode(children: [middle])
-
-        when:
-        def result = Utils.collectLinkedFiles(root)
-
-        then:
-        result.contains(file.canonicalFile)
-    }
-
-    def "collectLinkedFiles skips nodes with no link"() {
-        given:
-        def file = tempDir.resolve('linked.md').toFile()
-        file.createNewFile()
-        def linkedChild = createMockNode(linkFile: file)
-        def unlinkedChild = createMockNode()
-        def root = createMockNode(children: [linkedChild, unlinkedChild])
-
-        when:
-        def result = Utils.collectLinkedFiles(root)
-
-        then:
-        result.size() == 1
-        result.contains(file.canonicalFile)
-    }
-
-    def "collectLinkedFiles includes files linked via intermediate node"() {
-        given:
-        def file = tempDir.resolve('via-node.md').toFile()
-        file.createNewFile()
-        def linkedNode = createMockNode(linkFile: file)
-        def child = createMockNode(linkNode: linkedNode)
-        def root = createMockNode(children: [child])
-
-        when:
-        def result = Utils.collectLinkedFiles(root)
-
-        then:
-        result.contains(file.canonicalFile)
-    }
-
-    def "collectLinkedFiles returns empty set when no links exist"() {
-        given:
-        def root = createMockNode(children: [createMockNode(), createMockNode()])
-
-        when:
-        def result = Utils.collectLinkedFiles(root)
-
-        then:
-        result.isEmpty()
-    }
-
     // --- Tests for collectNodesByLinkedFile ---
 
     def "collectNodesByLinkedFile maps every linked file in the tree to its node"() {
@@ -498,8 +206,24 @@ class UtilsSpec extends Specification {
         def result = Utils.collectNodesByLinkedFile(root)
 
         then:
-        result[fileA.canonicalFile] == childA
-        result[fileB.canonicalFile] == childB
+        result.keySet() == [fileA, fileB] as Set
+        result[fileA] == childA
+        result[fileB] == childB
+    }
+
+    def "collectNodesByLinkedFile includes files linked via an intermediate node"() {
+        given:
+        def file = tempDir.resolve('via-node.md').toFile()
+        file.createNewFile()
+        def linkedNode = createMockNode(linkFile: file)
+        def child = createMockNode(linkNode: linkedNode)
+        def root = createMockNode(children: [child])
+
+        when:
+        def result = Utils.collectNodesByLinkedFile(root)
+
+        then:
+        result[file] == child
     }
 
     def "collectNodesByLinkedFile prefers a direct link over an indirect one to the same file"() {
@@ -515,7 +239,18 @@ class UtilsSpec extends Specification {
         def result = Utils.collectNodesByLinkedFile(root)
 
         then:
-        result[file.canonicalFile] == directNode
+        result[file] == directNode
+    }
+
+    def "collectNodesByLinkedFile keys by normalized path, so a link with a redundant segment still matches"() {
+        given:
+        def file = tempDir.resolve('a.md').toFile()
+        file.createNewFile()
+        def child = createMockNode(linkFile: new File(tempDir.toFile(), './a.md'))
+        def root = createMockNode(children: [child])
+
+        expect:
+        Utils.collectNodesByLinkedFile(root)[file] == child
     }
 
     // --- Tests for findNodeForFile ---
@@ -577,6 +312,22 @@ class UtilsSpec extends Specification {
         Utils.findNodeForFile(nodesByFile, orphanFile, docDir) == null
     }
 
+    def "findNodeForFile resolves a hit reached through a non-canonical path"() {
+        given: 'the node links the page directly, while the hit names the same file via a redundant "." segment'
+        def docDir = tempDir.resolve('docs').toFile()
+        docDir.mkdirs()
+        def pageFile = new File(docDir, 'Page.md')
+        pageFile.createNewFile()
+        def pageNode = createMockNode(linkFile: pageFile)
+        def nodesByFile = Utils.collectNodesByLinkedFile(createMockNode(children: [pageNode]))
+        def sameFileOtherPath = new File(docDir.path + '/./Page.md')
+
+        expect: 'both spellings still normalize to the same file'
+        sameFileOtherPath.path != pageFile.path
+        Utils.findNodeForFile(nodesByFile, sameFileOtherPath, docDir) == pageNode
+        Utils.findNodeForFile(nodesByFile, pageFile, docDir) == pageNode
+    }
+
     // --- Tests for nodePathText ---
 
     def "nodePathText returns the node's own text when it has no parent"() {
@@ -597,273 +348,140 @@ class UtilsSpec extends Specification {
         Utils.nodePathText(grandchildNode) == 'root > child > grandchild'
     }
 
-    def "updateNextSteps clears existing children before adding new ones"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* New step
-"""
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def deleted = []
-        def existingChild = new Expando()
-        existingChild.text = 'Old step'
-        existingChild.delete = { -> deleted << existingChild }
-        def children = [existingChild]
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> new ArrayList(children) }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node)
-
-        then:
-        new PollingConditions(timeout: 2).eventually {
-            deleted.size() == 1
-            deleted[0] == existingChild
-        }
-    }
-
-    // --- Tests for the sinceMillis gate on updateNextSteps ---
-
-    def "updateNextSteps skips re-reading when file is not modified after sinceMillis"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* New step
-"""
-        pageFile.setLastModified(1000L)
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def existingChild = new Expando()
-        existingChild.text = 'Old step'
-        def deleted = []
-        existingChild.delete = { -> deleted << existingChild }
-        def children = [existingChild]
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> new ArrayList(children) }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node, 2000L)
-
-        then:
-        deleted.isEmpty()
-        children.size() == 1
-        children[0].text == 'Old step'
-    }
-
-    def "updateNextSteps re-reads when file is modified after sinceMillis"() {
-        given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* New step
-"""
-        pageFile.setLastModified(3000L)
-        def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def children = []
-        def node = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap)
-        node.children = children
-        node.getChildren = { -> children }
-        node.createChild = { ->
-            def child = new Expando()
-            child.text = ''
-            children << child
-            return child
-        }
-
-        when:
-        Utils.updateNextSteps(node, 2000L)
-
-        then:
-        new PollingConditions(timeout: 2).eventually {
-            children.size() == 1
-            children[0].text == 'New step'
-        }
-    }
-
     // --- Tests for updateAllNextSteps ---
 
-    def "updateAllNextSteps updates every page node of the map and records the run time"() {
-        given:
+    private File nextStepsDocDir() {
         def docDir = tempDir.resolve('docs').toFile()
         docDir.mkdirs()
-        def taskFile = new File(docDir, 'Task.md')
-        taskFile.text = """\
+        return docDir
+    }
+
+    /** A page node for <docDir>/<name>.md holding the given text, attached under the map root. */
+    private pageNode(mindMap, File docDir, String name, String pageText, List existingChildren = []) {
+        def pageFile = new File(docDir, name + '.md')
+        pageFile.text = pageText
+        def node = createMockNode(text: name, linkFile: pageFile, mindMap: mindMap, children: existingChildren)
+        // A copy, like Freeplane's node model, so children can be deleted while iterating.
+        node.getChildren = { -> new ArrayList(node.children) }
+        mindMap.root.children << node
+        return node
+    }
+
+    /**
+     * Runs updateAllNextSteps() over a map holding one page ("Task") with the
+     * given text and waits until its children read as expected.
+     */
+    private void expectNextSteps(String pageText, List<String> expected, List existingChildren = []) {
+        def docDir = nextStepsDocDir()
+        def mindMap = createMindMapWithConfig(docDir.absolutePath)
+        mindMap.root.mindMap = mindMap
+        def taskNode = pageNode(mindMap, docDir, 'Task', pageText, existingChildren)
+
+        Utils.updateAllNextSteps(mindMap.root)
+
+        new PollingConditions(timeout: 2).eventually {
+            assert taskNode.children*.text == expected
+        }
+    }
+
+    def "updateAllNextSteps syncs up to three list items under the Next Steps heading"() {
+        expect:
+        expectNextSteps("""\
+[assets](Task.assets)
+
+## Contents
+
 ### Next Steps
 
 * First step
-"""
-        def otherFile = new File(docDir, 'Other.md')
-        otherFile.text = """\
+* Second step
+* Third step
+* Fourth step (should be ignored)
+
+## Journal
+""", ['First step', 'Second step', 'Third step'])
+    }
+
+    def "updateAllNextSteps accepts dash list items"() {
+        expect:
+        expectNextSteps("""\
 ### Next Steps
 
-* Other step
-"""
+- Step A
+- Step B
+""", ['Step A', 'Step B'])
+    }
+
+    def "updateAllNextSteps stops at the next heading"() {
+        expect:
+        expectNextSteps("""\
+### Next Steps
+
+* Only step
+
+### Another Section
+
+* Should not appear
+""", ['Only step'])
+    }
+
+    def "updateAllNextSteps replaces the existing children of a changed page"() {
+        given:
+        def existingChild = createMockNode(text: 'Old step')
+        def existingChildren = [existingChild]
+        existingChild.delete = { -> existingChildren.remove(existingChild) }
+
+        expect:
+        expectNextSteps("""\
+### Next Steps
+
+* New step
+""", ['New step'], existingChildren)
+    }
+
+    def "updateAllNextSteps updates every page node of the map"() {
+        given:
+        def docDir = nextStepsDocDir()
         def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def configNode = mindMap.root.children[0]
-        def taskNode = createMockNode(text: 'Task', linkFile: taskFile, mindMap: mindMap)
-        def otherNode = createMockNode(text: 'Other', linkFile: otherFile, mindMap: mindMap)
-        // The second page node is nested, so the whole tree has to be traversed.
-        taskNode.children << otherNode
-        mindMap.root.children << taskNode
         mindMap.root.mindMap = mindMap
+        def taskNode = pageNode(mindMap, docDir, 'Task', "### Next Steps\n\n* First step\n")
+        // Nested under the first page, so the whole tree has to be traversed.
+        def otherFile = new File(docDir, 'Other.md')
+        otherFile.text = "### Next Steps\n\n* Other step\n"
+        def otherNode = createMockNode(text: 'Other', linkFile: otherFile, mindMap: mindMap)
+        taskNode.children << otherNode
 
         when:
         Utils.updateAllNextSteps(mindMap.root)
 
         then:
         new PollingConditions(timeout: 2).eventually {
-            taskNode.children.any { it.text == 'First step' }
-            otherNode.children.any { it.text == 'Other step' }
+            assert taskNode.children.any { it.text == 'First step' }
+            assert otherNode.children*.text == ['Other step']
         }
-        configNode.children.find { it.text == 'nextStepsUpdatedAt' } != null
     }
 
-    def "updateAllNextSteps skips pages that were not modified since the last run"() {
+    def "updateAllNextSteps leaves a page alone whose children already match"() {
         given:
-        def docDir = tempDir.resolve('docs').toFile()
-        docDir.mkdirs()
-        def pageFile = new File(docDir, 'Task.md')
-        pageFile.text = """\
-### Next Steps
-
-* New step
-"""
-        pageFile.setLastModified(1000L)
+        def docDir = nextStepsDocDir()
         def mindMap = createMindMapWithConfig(docDir.absolutePath)
-        def configNode = mindMap.root.children[0]
-        configNode.children << createMockNode(text: 'nextStepsUpdatedAt',
-                children: [createMockNode(plainText: '2000')])
-        def deleted = []
-        def existingChild = createMockNode(text: 'Old step')
-        existingChild.delete = { -> deleted << existingChild }
-        def taskNode = createMockNode(text: 'Task', linkFile: pageFile, mindMap: mindMap,
-                children: [existingChild])
-        mindMap.root.children << taskNode
         mindMap.root.mindMap = mindMap
+        def deleted = []
+        def existingChild = createMockNode(text: 'Same step')
+        existingChild.delete = { -> deleted << existingChild }
+        def unchangedNode = pageNode(mindMap, docDir, 'Unchanged', "### Next Steps\n\n* Same step\n", [existingChild])
+        // Applied in the same EDT batch as the unchanged page, so once it shows up
+        // the unchanged page has been evaluated too.
+        def changedNode = pageNode(mindMap, docDir, 'Changed', "### Next Steps\n\n* New step\n")
 
         when:
         Utils.updateAllNextSteps(mindMap.root)
 
         then:
+        new PollingConditions(timeout: 2).eventually {
+            assert changedNode.children*.text == ['New step']
+        }
         deleted.isEmpty()
-        taskNode.children.size() == 1
-        taskNode.children[0].text == 'Old step'
-    }
-
-    // --- Tests for loadNextStepsUpdatedAt / saveNextStepsUpdatedAt ---
-
-    def "loadNextStepsUpdatedAt returns stored timestamp"() {
-        given:
-        def valueNode = createMockNode(plainText: '123456789')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 123456789L
-    }
-
-    def "loadNextStepsUpdatedAt returns 0 when timestamp node is missing"() {
-        given:
-        def configNode = createMockNode(text: 'config', children: [])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 0L
-    }
-
-    def "loadNextStepsUpdatedAt returns 0 when stored value is not a number"() {
-        given:
-        def valueNode = createMockNode(plainText: 'not-a-number')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        expect:
-        Utils.loadNextStepsUpdatedAt(node) == 0L
-    }
-
-    def "saveNextStepsUpdatedAt creates the timestamp node when absent"() {
-        given:
-        def configNode = createMockNode(text: 'config', children: [])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 987654321L)
-
-        then:
-        def keyNode = configNode.children.find { it.text == 'nextStepsUpdatedAt' }
-        keyNode != null
-        keyNode.children[0].text == '987654321'
-    }
-
-    def "saveNextStepsUpdatedAt updates the existing timestamp node"() {
-        given:
-        def valueNode = createMockNode(text: '111')
-        def keyNode = createMockNode(text: 'nextStepsUpdatedAt', children: [valueNode])
-        def configNode = createMockNode(text: 'config', children: [keyNode])
-        def rootNode = createMockNode(children: [configNode])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 222L)
-
-        then:
-        configNode.children.size() == 1
-        keyNode.children.size() == 1
-        valueNode.text == '222'
-    }
-
-    def "saveNextStepsUpdatedAt throws when config node is missing"() {
-        given:
-        def rootNode = createMockNode(children: [])
-        def mindMap = new Expando()
-        mindMap.root = rootNode
-        def node = createMockNode(mindMap: mindMap)
-
-        when:
-        Utils.saveNextStepsUpdatedAt(node, 1L)
-
-        then:
-        def e = thrown(RuntimeException)
-        e.message == 'config node is missing.'
+        unchangedNode.children == [existingChild]
     }
 }

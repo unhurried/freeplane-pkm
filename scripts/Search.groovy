@@ -14,17 +14,19 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Frame
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.util.concurrent.atomic.AtomicBoolean
 
-// A dedicated Swing search dialog for the document directory: full-text,
-// case-insensitive, AND-of-keywords search across both file content and file
-// name (see SearchIndex.groovy). Each result can either be opened directly
-// via Utils.openInDesktop(), or - when it corresponds to a page/directory node
-// somewhere in the map - have that node selected and centered instead, so a
-// search result can be used as a shortcut back into the map's own structure.
+// Search dialog for the document directory (see SearchIndex.groovy). A result
+// can be opened in the OS, or - when a node in the map links it - that node
+// selected and centered instead.
+
+def UPDATING_INDEX_STATUS = 'Updating search index...'
 
 def docDir
 try {
@@ -34,10 +36,45 @@ try {
     return
 }
 
-// The dialog is modeless and its callbacks keep running after this script
-// returns, so the map root - not the node the script was invoked on - is
-// what all later node lookups/selections are anchored to.
+// The dialog outlives this script, so node lookups are anchored to the map root.
 def mapRoot = node.mindMap.root
+
+// Owned by the Freeplane window, so selecting a node never hides the dialog behind the map.
+Frame owner = null
+try {
+    owner = (Frame) ui.frame
+} catch (Exception ignored) {
+    // Fall back to the default (unowned) dialog below.
+}
+
+// Identifies this map's dialog for reuse (below). Keyed on the map model's
+// identity, not its path: a reopened map is a new model whose old dialog holds
+// nodes that are no longer selectable.
+def mapId
+try {
+    mapId = System.identityHashCode(node.mindMap.delegate)
+} catch (Exception ignored) {
+    mapId = ''
+}
+def dialogName = "freeplane-pkm-search|${mapId}|${docDir.absolutePath}".toString()
+
+// Each menu script invocation gets its own class loader, so a second dialog
+// would reload Lucene and Kuromoji's dictionary while the first copy stays on
+// the heap. Re-show the existing dialog instead; componentShown (below) does
+// the index refresh and focus handling on every show.
+def existingDialog = null
+try {
+    existingDialog = owner?.ownedWindows?.find { window ->
+        window instanceof JDialog && window.name == dialogName && window.displayable
+    }
+} catch (Exception ignored) {
+    // No reusable dialog - build a new one below.
+}
+if (existingDialog) {
+    existingDialog.visible = true
+    existingDialog.toFront()
+    return
+}
 
 def columnNames = ['File', 'Node', 'Snippet'] as String[]
 def tableModel = new DefaultTableModel(columnNames, 0) {
@@ -66,17 +103,14 @@ def updateActionButtons = {
             currentNodes[table.convertRowIndexToModel(viewRow)] != null
 }
 
-def showHits = { List hits ->
+// Nodes and paths are resolved on the search thread (see runSearch); this only fills the table.
+def showHits = { List hits, List nodes, List nodePaths ->
     currentHits = hits
-    // Rebuilt on every search (not just once) so results reflect any node
-    // links added, removed or retargeted since the dialog was opened.
-    def nodesByFile = Utils.collectNodesByLinkedFile(mapRoot)
-    currentNodes = hits.collect { hit -> Utils.findNodeForFile(nodesByFile, hit.file, docDir) }
+    currentNodes = nodes
 
     tableModel.rowCount = 0
     hits.eachWithIndex { hit, i ->
-        def targetNode = currentNodes[i]
-        tableModel.addRow([hit.relativePath, targetNode ? Utils.nodePathText(targetNode) : '', hit.snippet] as Object[])
+        tableModel.addRow([hit.relativePath, nodePaths[i], hit.snippet] as Object[])
     }
     statusLabel.text = hits.isEmpty() ? 'No results' : "${hits.size()} result(s)"
     updateActionButtons()
@@ -94,9 +128,22 @@ def runSearch = {
             hits = []
             SwingUtilities.invokeLater { statusLabel.text = "search failed: ${e.message}" }
         }
-        def results = hits
+
+        // Resolving hits to nodes walks the whole map and normalizes every linked
+        // file, so it stays off the EDT. Rebuilt per search so results reflect
+        // links changed since the dialog opened. Reads only; mutations go via EDT.
+        def nodes
+        try {
+            def nodesByFile = Utils.collectNodesByLinkedFile(mapRoot)
+            nodes = hits.collect { hit -> Utils.findNodeForFile(nodesByFile, hit.file, docDir) }
+        } catch (Exception ignored) {
+            // A hit whose node can't be resolved (map changed underneath) is still worth showing as a file.
+            nodes = hits.collect { null }
+        }
+        def nodePaths = nodes.collect { targetNode -> targetNode ? Utils.nodePathText(targetNode) : '' }
+
         SwingUtilities.invokeLater {
-            showHits(results)
+            showHits(hits, nodes, nodePaths)
             searchButton.enabled = true
         }
     }
@@ -201,38 +248,45 @@ content.add(searchPanel, BorderLayout.NORTH)
 content.add(new JScrollPane(table), BorderLayout.CENTER)
 content.add(statusPanel, BorderLayout.SOUTH)
 
-// Owned by the main Freeplane window when available, so the dialog can never
-// end up hidden behind the map after a node selection brings the map's own
-// window forward; falls back to an unowned dialog if ui.frame isn't usable.
-Frame owner = null
-try {
-    owner = (Frame) ui.frame
-} catch (Exception ignored) {
-    // Fall back to the default (unowned) dialog below.
+// Brings the index up to date in the background; searching meanwhile works
+// against what is on disk. warmUp() loads the Kuromoji dictionary here rather
+// than on the user's first query.
+def indexRefreshInProgress = new AtomicBoolean(false)
+def refreshIndex = {
+    if (!indexRefreshInProgress.compareAndSet(false, true)) return
+    statusLabel.text = UPDATING_INDEX_STATUS
+    Thread.start {
+        try {
+            SearchIndex.warmUp()
+            SearchIndex.updateIndex(docDir)
+        } catch (Exception ignored) {
+            // Best effort - a failed background refresh should not block searching.
+        } finally {
+            indexRefreshInProgress.set(false)
+        }
+        SwingUtilities.invokeLater {
+            if (statusLabel.text == UPDATING_INDEX_STATUS) statusLabel.text = 'Ready'
+        }
+    }
 }
 
 def dialog = new JDialog(owner, 'Search', false)
-dialog.defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
+// Hidden, not disposed, and named, so the next F6 re-shows this dialog (see the top of this script).
+dialog.defaultCloseOperation = JDialog.HIDE_ON_CLOSE
+dialog.name = dialogName
 dialog.contentPane = content
 dialog.size = new Dimension(960, 540)
 dialog.setLocationRelativeTo(owner)
-dialog.visible = true
-keywordField.requestFocusInWindow()
+// Fires on the first show and on every reopen.
+dialog.addComponentListener(new ComponentAdapter() {
+    void componentShown(ComponentEvent event) {
+        // Queued: the window can't take focus while it is still being shown.
+        SwingUtilities.invokeLater {
+            keywordField.requestFocusInWindow()
+            keywordField.selectAll()
+        }
+        refreshIndex()
+    }
+})
 updateActionButtons()
-
-// Bring the index up to date in the background as soon as the dialog opens,
-// so results reflect files added/changed since the last periodic refresh
-// (see init.groovy) without the user having to run "Update Next Steps and
-// Search Index" first. Search still works against whatever is currently on disk while
-// this runs, and simply may miss the most recent changes until it finishes.
-statusLabel.text = 'Updating search index...'
-Thread.start {
-    try {
-        SearchIndex.updateIndex(docDir)
-    } catch (Exception ignored) {
-        // Best effort - a failed background refresh should not block searching.
-    }
-    SwingUtilities.invokeLater {
-        if (statusLabel.text == 'Updating search index...') statusLabel.text = 'Ready'
-    }
-}
+dialog.visible = true

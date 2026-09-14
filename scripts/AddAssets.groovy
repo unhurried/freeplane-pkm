@@ -1,12 +1,12 @@
-def pageFile = Utils.getPageFile(node)
-if (!pageFile) {
+// Creates the page's assets directory and links it from the top of the page.
+if (Utils.getDocNodeType(node) != Utils.DOC_TARGET_PAGE) {
     ui.errorMessage('target node is not a page.')
     return
 }
 
 def docDir = Utils.loadDocDir(node)
-def pageName = node.text
-def pageAssetsDir = new File(docDir, pageName + '.assets')
+def pageFile = Utils.pageFile(docDir, node.text)
+def pageAssetsDir = Utils.assetsDir(docDir, node.text)
 
 if (pageAssetsDir.exists()) {
     ui.errorMessage('page assets directory already exists.')
@@ -14,15 +14,4 @@ if (pageAssetsDir.exists()) {
 }
 
 pageAssetsDir.mkdir()
-
-def pageText = pageFile.getText('UTF-8')
-if (pageText.startsWith('\uFEFF')) {
-    pageText = pageText.substring(1)
-}
-
-def assetsLink = "[assets](${pageAssetsDir.getName()})\n\n"
-pageText = assetsLink + pageText
-
-byte[] BOM = [(byte) 0xEF, (byte) 0xBB, (byte) 0xBF]
-pageFile.bytes = BOM
-pageFile.append(pageText, 'UTF-8')
+Utils.writePage(pageFile, "[assets](${pageAssetsDir.name})\n\n" + Utils.readPage(pageFile))

@@ -1,8 +1,7 @@
 def docDir = Utils.loadDocDir(node)
 def pageName = node.text
 
-def INVALID_CHARS_PATTERN = '[\\\\/:*?"><|]'
-if (pageName =~ INVALID_CHARS_PATTERN) {
+if (!Utils.isValidName(pageName)) {
     ui.errorMessage('page name includes invalid characters')
     return
 }
@@ -13,14 +12,14 @@ if (!templateFile.exists()) {
     return
 }
 
-def pageFile = new File(docDir, pageName + '.md')
+def pageFile = Utils.pageFile(docDir, pageName)
 if (pageFile.exists()) {
     node.link.file = pageFile
     ui.errorMessage('page file already exists.')
     return
 }
 
-def pageAssetsDir = new File(docDir, pageName + '.assets')
+def pageAssetsDir = Utils.assetsDir(docDir, pageName)
 if (pageAssetsDir.exists()) {
     ui.errorMessage('page assets directory already exists.')
     return
@@ -28,13 +27,10 @@ if (pageAssetsDir.exists()) {
 
 pageAssetsDir.mkdir()
 
-def pageText = templateFile.text
-pageText = pageText.replace('${page_assets_name}', pageAssetsDir.getName())
+def pageText = Utils.readPage(templateFile)
+pageText = pageText.replace('${page_assets_name}', pageAssetsDir.name)
 pageText = pageText.replace('${today}', new Date().format('yy/MM/dd'))
-
-byte[] BOM = [(byte) 0xEF, (byte) 0xBB, (byte) 0xBF]
-pageFile.bytes = BOM
-pageFile.append(pageText, 'UTF-8')
+Utils.writePage(pageFile, pageText)
 
 node.link.file = pageFile
 Utils.openInDesktop(pageFile)

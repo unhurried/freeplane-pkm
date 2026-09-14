@@ -71,7 +71,6 @@ abstract class ScriptSpec extends Specification {
 
         c = new Expando()
         c.getUserDirectory = { -> userDirectory }
-        c.getViewRoot = { -> rootNode }
         c.select = { targetNode -> selectedNodes << targetNode }
 
         // Replaces the real (headless-hostile, externally side-effecting) desktop call

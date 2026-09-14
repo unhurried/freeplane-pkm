@@ -1,9 +1,5 @@
-// Page Nodeならページファイル(.md)を、Directory Nodeならディレクトリを、
-// OSの既定アプリケーションで開く。それ以外のNodeでは何もしない。
-
-def docNodeType = Utils.getDocNodeType(node)
-if (docNodeType == null) {
-    return
+// Opens a page node's .md file or a directory node's directory in the OS default
+// application; does nothing for any other node.
+if (Utils.getDocNodeType(node) != null) {
+    Utils.openInDesktop(Utils.getLinkedFile(node))
 }
-
-Utils.openInDesktop(Utils.getLinkedFile(node))
