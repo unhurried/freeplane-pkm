@@ -7,6 +7,12 @@ import spock.util.concurrent.PollingConditions
  */
 class UtilsSpec extends ScriptSpec {
 
+    FakeNode toDoNode
+
+    def setup() {
+        toDoNode = addChild(rootNode, text: Utils.TODO_NODE_NAME)
+    }
+
     // --- Tests for loadDocDir ---
 
     def "loadDocDir returns document directory when config is valid"() {
@@ -351,5 +357,85 @@ class UtilsSpec extends ScriptSpec {
         }
         !existingChild.deleted
         unchangedNode.children == [existingChild]
+    }
+
+    // --- Tests for the ToDo cleanup of updateAllNextSteps ---
+
+    /** A ToDo item the way AddToToDo creates it: "item (page)" linking <docDir>/<page>.md. */
+    private FakeNode toDoItem(String item, String page, FakeNode parentNode = toDoNode) {
+        return addChild(parentNode, text: Utils.toDoItemText(item, page), linkFile: Utils.pageFile(docDir, page))
+    }
+
+    /**
+     * Runs updateAllNextSteps() and waits for the item to be deleted. Deletions
+     * land in one EDT batch, so the other ToDo children have been judged by then.
+     */
+    private void expectDeleted(FakeNode item) {
+        Utils.updateAllNextSteps(rootNode)
+
+        new PollingConditions(timeout: 2).eventually {
+            assert item.deleted
+        }
+    }
+
+    def "updateAllNextSteps deletes a ToDo item that is gone from its page's Next Steps"() {
+        given:
+        pageNode('Task', "### Next Steps\n\n* Kept step\n")
+        def gone = toDoItem('Gone step', 'Task')
+        // Checking an item off (ToggleCheckmark) doesn't spare it.
+        gone.icons.addIcon('button_ok')
+        def kept = toDoItem('Kept step', 'Task')
+
+        expect:
+        expectDeleted(gone)
+        !kept.deleted
+        toDoNode.children == [kept]
+    }
+
+    def "updateAllNextSteps keeps a ToDo item listed beyond the three synced into the page node"() {
+        given:
+        def fourth = toDoItem('Four', 'Task')
+
+        expect:
+        expectNextSteps("### Next Steps\n\n* One\n* Two\n* Three\n* Four\n", ['One', 'Two', 'Three'])
+        !fourth.deleted
+        toDoNode.children == [fourth]
+    }
+
+    def "updateAllNextSteps leaves ToDo children alone that don't link a page"() {
+        given:
+        pageNode('Task', "### Next Steps\n\n* Other step\n")
+        def unlinked = addChild(toDoNode, text: 'call the plumber')
+        def external = addChild(toDoNode, text: 'read it (notes)', linkFile: new File(tempDir.toFile(), 'notes.md'))
+        def stale = toDoItem('Gone step', 'Task')
+
+        expect:
+        expectDeleted(stale)
+        toDoNode.children == [unlinked, external]
+    }
+
+    def "updateAllNextSteps deletes a ToDo item whose page file is missing"() {
+        given:
+        def orphan = toDoItem('Some step', 'Removed Page')
+
+        expect:
+        expectDeleted(orphan)
+        toDoNode.children.isEmpty()
+    }
+
+    def "updateAllNextSteps only judges the direct children of the ToDo node"() {
+        given:
+        pageNode('Task', "### Next Steps\n\n* Kept step\n")
+        def kept = toDoItem('Kept step', 'Task')
+        // A sub-note that happens to look like a stale item: stays with its parent.
+        def note = toDoItem('Gone step', 'Task', kept)
+        def archived = toDoItem('Gone step', 'Task', addChild(toDoNode, text: 'archive'))
+        def stale = toDoItem('Gone step', 'Task')
+
+        expect:
+        expectDeleted(stale)
+        !note.deleted
+        !archived.deleted
+        kept.children == [note]
     }
 }

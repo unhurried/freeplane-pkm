@@ -29,7 +29,7 @@ Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync w
 
 - The document directory is read from `root > config > docDirPath > <path>`.
 - Page node: text links `<docDir>/<text>.md`; directory node: `<docDir>/<text>/`; attachments live in `<text>.assets/`. Pages are UTF-8 with a BOM (`Utils.readPage`/`writePage`).
-- Up to 3 list items under a page's `### Next Steps` heading are synced into the node's children; a page whose children already match is left untouched.
+- Up to 3 list items under a page's `### Next Steps` heading are synced into the node's children; a page whose children already match is left untouched. The same refresh deletes `root > ToDo` items (`AddToToDo`'s `<item> (<page>)`, linking the page file) whose text is no longer among *all* the page's Next Steps items, or whose page is gone.
 - `root > ToDo` holds the task list. Anything under a node named `archive` is hidden by the default filter. Dates use `yy/MM/dd`.
 - Node mutations happen on the Swing EDT (`SwingUtilities.invokeLater`); file I/O is kept off it.
 - `scripts/init/init.groovy` runs at startup and calls `Utils.updateNextStepsAndIndex` on map changes every few minutes. Init scripts run with the *global* scripting permissions, so it goes through `ScriptingEngine.executeScript` with read/write permission granted explicitly.

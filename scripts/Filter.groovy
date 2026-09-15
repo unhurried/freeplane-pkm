@@ -23,7 +23,7 @@ if (!keyword) {
 } else if (keyword == 'a') {
     node.map.filter(true, true) { true }
 } else if (keyword == 't') {
-    node.map.filter(true, true) { it.parent != null && it.parent.parent == null && it.text == 'ToDo' }
+    node.map.filter(true, true) { it.parent != null && it.parent.parent == null && it.text == Utils.TODO_NODE_NAME }
 } else if (keyword == 'd') {
     def today = LocalDate.now()
     node.map.filter(true, true) {

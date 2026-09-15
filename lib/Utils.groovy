@@ -6,6 +6,8 @@ import javax.swing.SwingUtilities
 
 /** Date format used for due dates and journal entries throughout the map and pages. */
 @Field static final String DATE_FORMAT = 'yy/MM/dd'
+/** The node under the root that holds the task list. */
+@Field static final String TODO_NODE_NAME = 'ToDo'
 
 @Field private static final String CONFIG_NODE_NAME = 'config'
 @Field private static final String DOC_DIR_PATH_KEY = 'docDirPath'
@@ -37,6 +39,11 @@ def static loadDocDir(node) {
 
 def static findChildByText(parentNode, String text) {
     return parentNode.children.find { it.text == text }
+}
+
+/** The text of a root > ToDo item copied from a page: "item (page)". */
+def static String toDoItemText(String item, String page) {
+    return "${item} (${page})"
 }
 
 def static File pageFile(File docDir, String name) {
@@ -186,10 +193,11 @@ def static updateNextStepsAndIndex(node) {
 
 /**
  * Syncs the "### Next Steps" list items of every page in the map into the page
- * node's children. Files are read on a background thread; the node mutations
- * are then applied in one batch on the Swing EDT, and only for pages whose
- * items actually differ from the current children, so an unchanged map stays
- * untouched (and unmodified).
+ * node's children, and drops the root > ToDo items (see AddToToDo.groovy) whose
+ * text no longer appears among their page's Next Steps. Files are read on a
+ * background thread; the node mutations are then applied in one batch on the
+ * Swing EDT, and only for pages whose items actually differ from the current
+ * children, so an unchanged map stays untouched (and unmodified).
  */
 def static updateAllNextSteps(node, File docDir = null) {
     def root = node.mindMap.root
@@ -197,15 +205,20 @@ def static updateAllNextSteps(node, File docDir = null) {
     def targets = collectNodes(root)
 
     Thread.start {
+        // Every page is read once, whether page nodes or ToDo items (or both) refer to it.
+        def itemsByFile = [:].withDefault { readNextStepItems(it) }
         def nextSteps = [:]
         for (target in targets) {
-            def lines = readNextSteps(target, dir)
-            if (lines != null) nextSteps[target] = lines
+            if (getDocNodeType(target, dir) != DOC_TARGET_PAGE) continue
+            def items = itemsByFile[pageFile(dir, target.text)]
+            if (items != null) nextSteps[target] = items.take(MAX_NEXT_STEPS)
         }
+        def staleToDoItems = collectStaleToDoItems(root, dir, itemsByFile)
         SwingUtilities.invokeLater {
             nextSteps.each { target, lines ->
                 if (target.children*.text != lines) applyNextSteps(target, lines)
             }
+            staleToDoItems*.delete()
         }
     }
 }
@@ -226,18 +239,17 @@ private static List collectNodes(node) {
 }
 
 /**
- * The Next Steps items of a page node, or null for anything else: a node that
- * isn't a page, or one whose file can't be read (so one broken link doesn't
- * interrupt the scan of the rest of the map).
+ * Every list item under the page's Next Steps heading, without the list marker.
+ * Null when the file can't be read, so one broken link doesn't interrupt the
+ * scan of the rest of the map.
  */
-private static List<String> readNextSteps(node, File docDir) {
+private static List<String> readNextStepItems(File pageFile) {
     try {
-        if (getDocNodeType(node, docDir) != DOC_TARGET_PAGE) return null
-        def lines = pageFile(docDir, node.text).readLines('UTF-8')
+        def lines = readPage(pageFile).readLines()
         def start = lines.indexOf(NEXT_STEPS_HEADING)
         if (start < 0) return []
         return lines.drop(start + 1).takeWhile { !it.startsWith('#') }
-                .findAll { isListItem(it) }.take(MAX_NEXT_STEPS)*.substring(2)
+                .findAll { isListItem(it) }*.substring(2)
     } catch (Exception ignored) {
         return null
     }
@@ -245,6 +257,25 @@ private static List<String> readNextSteps(node, File docDir) {
 
 private static boolean isListItem(String line) {
     return (line.startsWith('* ') || line.startsWith('- ')) && line.length() > MIN_LIST_ITEM_LENGTH
+}
+
+/**
+ * The root > ToDo children linking <docDir>/<page>.md (the way AddToToDo creates
+ * them) whose text is no longer among that page's Next Steps items in
+ * itemsByFile (an unreadable page counts). Reads files, so runs off the EDT.
+ */
+private static List collectStaleToDoItems(root, File docDir, Map<File, List<String>> itemsByFile) {
+    def toDoNode = findChildByText(root, TODO_NODE_NAME)
+    if (!toDoNode) return []
+
+    return toDoNode.children.findAll { item ->
+        def linkedFile = item.link.file
+        def pageName = linkedFile ? pageNameOf(linkedFile) : null
+        if (!pageName || linkedFile != pageFile(docDir, pageName)) return false
+
+        def items = itemsByFile[linkedFile]
+        return items == null || !items.any { toDoItemText(it, pageName) == item.text }
+    }
 }
 
 private static void applyNextSteps(node, List<String> lines) {
