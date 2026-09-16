@@ -43,7 +43,28 @@ def static findChildByText(parentNode, String text) {
 
 /** The text of a root > ToDo item copied from a page: "item (page)". */
 def static String toDoItemText(String item, String page) {
-    return "${item} (${page})"
+    return item + toDoItemSuffix(page)
+}
+
+/**
+ * Points the root > ToDo items copied from the page oldName (the way AddToToDo
+ * creates them: "item (oldName)" linking <docDir>/<oldName>.md) at its new
+ * name. Without this, the next refresh sees them linking a page that no longer
+ * exists and deletes them (see updateAllNextSteps).
+ */
+def static void renameToDoItems(root, File docDir, String oldName, String newName) {
+    def toDoNode = findChildByText(root, TODO_NODE_NAME)
+    if (!toDoNode) return
+
+    def oldFile = pageFile(docDir, oldName)
+    def oldSuffix = toDoItemSuffix(oldName)
+    for (item in toDoNode.children) {
+        if (item.link.file != oldFile) continue
+        if (item.text.endsWith(oldSuffix)) {
+            item.text = toDoItemText(item.text.substring(0, item.text.length() - oldSuffix.length()), newName)
+        }
+        item.link.file = pageFile(docDir, newName)
+    }
 }
 
 def static File pageFile(File docDir, String name) {
@@ -253,6 +274,10 @@ private static List<String> readNextStepItems(File pageFile) {
     } catch (Exception ignored) {
         return null
     }
+}
+
+private static String toDoItemSuffix(String page) {
+    return " (${page})"
 }
 
 private static boolean isListItem(String line) {

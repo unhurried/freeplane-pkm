@@ -62,6 +62,46 @@ class EditSpec extends ScriptSpec {
         'Memo (WIP)'| 'Memo (done)'
     }
 
+    // The ToDo items AddToToDo copied from the page name it in their text and
+    // link. Left alone, the next refresh (Utils.updateAllNextSteps) would see
+    // them linking a page that no longer exists and delete them.
+    def "renames the page's ToDo items along with the page"() {
+        given:
+        writePage('Design Memo', "### Next Steps\n\n* write the draft\n")
+        def node = addPageNode('Design Memo')
+        def toDoNode = addChild(rootNode, text: Utils.TODO_NODE_NAME)
+        def item = addChild(toDoNode, text: 'write the draft (Design Memo)', linkFile: new File(docDir, 'Design Memo.md'))
+        def otherItem = addChild(toDoNode, text: 'call back (Other Page)', linkFile: new File(docDir, 'Other Page.md'))
+        def unlinkedItem = addChild(toDoNode, text: 'buy milk (Design Memo)')
+        inputAnswers << 'Design Notes'
+
+        when:
+        runScript('Edit.groovy', node)
+
+        then:
+        errorMessages.isEmpty()
+        item.text == 'write the draft (Design Notes)'
+        item.link.file == new File(docDir, 'Design Notes.md')
+        otherItem.text == 'call back (Other Page)'
+        otherItem.link.file == new File(docDir, 'Other Page.md')
+        unlinkedItem.text == 'buy milk (Design Memo)'
+        unlinkedItem.link.file == null
+    }
+
+    def "renames the page's ToDo items even when the map has no ToDo node"() {
+        given:
+        writePage('Design Memo')
+        def node = addPageNode('Design Memo')
+        inputAnswers << 'Design Notes'
+
+        when:
+        runScript('Edit.groovy', node)
+
+        then:
+        errorMessages.isEmpty()
+        node.text == 'Design Notes'
+    }
+
     def "renames a directory node"() {
         given:
         makeDir('Projects')

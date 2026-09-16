@@ -132,18 +132,23 @@ def static String extractText(File file) {
 /**
  * Incrementally updates the index: new/modified files (per the recorded mtime)
  * are (re-)extracted, deleted files are dropped, unmodified files are left
- * alone. Rebuilds everything when the on-disk schema version is stale. A
- * no-op when another update currently holds the index lock.
+ * alone. Rebuilds everything when the on-disk schema version is stale or the
+ * Lucene index itself is missing (deleted by hand, or never written) - going
+ * by files.meta alone would then treat every file as already indexed and leave
+ * the search empty until a document changes. A no-op when another update
+ * currently holds the index lock.
  *
  * The file walk and the diff against files.meta come first, so the common
- * "nothing changed" run never touches Lucene at all (this runs every few
- * minutes from init.groovy, in a class loader that has to load it first).
+ * "nothing changed" run never opens the index for writing or loads the
+ * analyzer (this runs every few minutes from init.groovy, in a class loader
+ * that has to load it first).
  */
 def static void updateIndex(File docDir) {
     def metaFile = new File(new File(docDir, INDEX_DIR_NAME), META_FILE_NAME)
     def meta = loadMeta(metaFile)
-    def schemaChanged = meta.version != INDEX_SCHEMA_VERSION
-    Map<String, Long> knownMTimes = schemaChanged ? [:] : meta.mtimes
+    def indexDir = luceneDir(docDir)
+    def rebuild = meta.version != INDEX_SCHEMA_VERSION || !indexExists(indexDir)
+    Map<String, Long> knownMTimes = rebuild ? [:] : meta.mtimes
 
     Map<String, Long> currentMTimes = [:]
     Map<String, File> changedFiles = [:]
@@ -153,8 +158,7 @@ def static void updateIndex(File docDir) {
         if (knownMTimes[relPath] != mtime) changedFiles[relPath] = file
     }
     def deletedPaths = knownMTimes.keySet() - currentMTimes.keySet()
-    def indexDir = luceneDir(docDir)
-    if (!schemaChanged && !changedFiles && !deletedPaths && indexDir.isDirectory()) return
+    if (!rebuild && !changedFiles && !deletedPaths) return
 
     indexDir.mkdirs()
     FSDirectory.open(indexDir.toPath()).withCloseable { directory ->
@@ -166,7 +170,7 @@ def static void updateIndex(File docDir) {
         }
 
         writer.withCloseable {
-            if (schemaChanged) writer.deleteAll()
+            if (rebuild) writer.deleteAll()
 
             changedFiles.each { relPath, file ->
                 writer.updateDocument(new Term(FIELD_PATH, relPath), toDocument(file, relPath))
@@ -277,6 +281,12 @@ private static Analyzer newJapaneseAnalyzer(boolean forFilename) {
 
 private static File luceneDir(File docDir) {
     return new File(new File(docDir, INDEX_DIR_NAME), LUCENE_SUBDIR_NAME)
+}
+
+/** Whether a Lucene index (not merely the directory) exists at indexDir. */
+private static boolean indexExists(File indexDir) {
+    if (!indexDir.isDirectory()) return false
+    return FSDirectory.open(indexDir.toPath()).withCloseable { directory -> DirectoryReader.indexExists(directory) }
 }
 
 private static Document toDocument(File file, String relPath) {

@@ -6,8 +6,9 @@
 // a script-local variable, has to be passed in.
 
 def renamePage(File docDir, String newName) {
-    def pageFile = Utils.pageFile(docDir, node.text)
-    def pageAssetsDir = Utils.assetsDir(docDir, node.text)
+    def oldName = node.text
+    def pageFile = Utils.pageFile(docDir, oldName)
+    def pageAssetsDir = Utils.assetsDir(docDir, oldName)
     def newPageFile = Utils.pageFile(docDir, newName)
     def newPageAssetsDir = Utils.assetsDir(docDir, newName)
 
@@ -38,6 +39,9 @@ def renamePage(File docDir, String newName) {
 
     node.text = newName
     node.link.file = newPageFile
+    // The ToDo items copied from this page name it too; the next refresh would
+    // otherwise drop them as items of a page that no longer exists.
+    Utils.renameToDoItems(node.mindMap.root, docDir, oldName, newName)
 }
 
 def renameDirectory(File docDir, String newName) {

@@ -291,6 +291,28 @@ class SearchIndexSpec extends Specification {
         metaFile.readLines()[0] == "version=${SearchIndex.INDEX_SCHEMA_VERSION}"
     }
 
+    // files.meta used to be the only thing consulted: with the Lucene files gone
+    // but files.meta intact, nothing counted as changed, so an empty index was
+    // committed and every search came back empty until a document was edited.
+    def "updateIndex rebuilds the whole index when the Lucene index is gone but files.meta is not"() {
+        given:
+        textFile('Alpha.md', 'mountains')
+        SearchIndex.updateIndex(docDir)
+        assert SearchIndex.search(docDir, 'mountains').size() == 1
+        def luceneDir = new File(docDir, "${SearchIndex.INDEX_DIR_NAME}/lucene")
+
+        when: 'the Lucene files are removed by hand, leaving files.meta claiming everything is indexed'
+        luceneDir.deleteDir()
+        if (leaveEmptyDir) luceneDir.mkdirs()
+        SearchIndex.updateIndex(docDir)
+
+        then:
+        SearchIndex.search(docDir, 'mountains').size() == 1
+
+        where:
+        leaveEmptyDir << [false, true]
+    }
+
     // Pins the tokenization an existing on-disk index was built with. If this
     // fails because the analyzer changed on purpose, bump INDEX_SCHEMA_VERSION
     // (so users' indexes get rebuilt) and update the expected tokens together.
