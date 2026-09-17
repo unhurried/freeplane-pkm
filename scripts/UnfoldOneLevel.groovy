@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 // Equivalent of the built-in MindMap/UnfoldOneLevelAction (default shortcut F4).
 // The built-in action cannot be shipped with an add-on shortcut, so this script
 // delegates to it, keeping the behavior identical.

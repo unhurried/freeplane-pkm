@@ -32,6 +32,8 @@ The scripts are available under Tools → Scripts → Freeplane PKM, with the ke
 | F11 | Delete |
 | F12 | Update Next Steps and Search Index |
 
+With several nodes selected, Open, Delete and Add to ToDo act on all of them (Delete asks once, listing every target), Toggle Checkmark, New Page and New Directory run on each, and Edit and Add Assets ask for a single node to be selected.
+
 ## Full-Text Document Search
 
 Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a search dialog: type keywords, and matching files show up in a result list with a short content snippet. Double-click a result (or select it and press Enter) to open it with the OS default application, via `Desktop.open()`.

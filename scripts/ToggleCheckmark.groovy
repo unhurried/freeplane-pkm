@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SELECTED_NODE})
 // Toggle Freeplane's checkmark icon ("button_ok") on the selected node.
 def ICON = 'button_ok'
 if (node.icons.icons.contains(ICON)) {

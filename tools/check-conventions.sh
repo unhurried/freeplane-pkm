@@ -86,6 +86,16 @@ while IFS= read -r f; do
     fail "$f builds fixtures with 'new Expando(' - use test/FakeNode.groovy (see its class doc)."
 done <<< "$(grep -rl 'new Expando(' test/ 2>/dev/null | grep -vx 'test/ScriptSpec.groovy' || true)"
 
+# --- 5. Every script declares its execution mode ---
+# packageAddon reads the mode from this comment (and fails without it); Freeplane
+# reads it too when the script sits in a plain scripts directory.
+
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    grep -qE '@ExecutionModes\(\{ *(ON_SINGLE_NODE|ON_SELECTED_NODE|ON_SELECTED_NODE_RECURSIVELY) *\}\)' "scripts/$f" ||
+        fail "scripts/$f has no '// @ExecutionModes({ON_SINGLE_NODE})' (or ON_SELECTED_NODE) comment."
+done <<< "$actual_scripts"
+
 if [[ "$violations" -gt 0 ]]; then
     echo "check-conventions: $violations violation(s) found." >&2
     exit 1

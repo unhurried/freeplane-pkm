@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SELECTED_NODE})
 def docDir = Utils.loadDocDir(node)
 def pageName = node.text
 

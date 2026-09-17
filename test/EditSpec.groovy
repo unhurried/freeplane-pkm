@@ -193,4 +193,22 @@ class EditSpec extends ScriptSpec {
         new File(docDir, 'Design Memo.md').isFile()
         !new File(docDir, 'Design Notes.md').exists()
     }
+
+    def "refuses to run on a multi-selection"() {
+        given:
+        writePage('Design Memo')
+        def node = addPageNode('Design Memo')
+        def other = addPageNode('Other Memo')
+        selection = [node, other]
+        inputAnswers << 'Design Notes'
+
+        when:
+        runScript('Edit.groovy', node)
+
+        then:
+        errorMessages == ['select a single node to edit.']
+        inputAnswers == ['Design Notes']
+        node.text == 'Design Memo'
+        new File(docDir, 'Design Memo.md').isFile()
+    }
 }

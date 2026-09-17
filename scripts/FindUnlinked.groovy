@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 def UNLINKED_NODE_NAME = 'unlinked'
 
 def docDir = Utils.loadDocDir(node)

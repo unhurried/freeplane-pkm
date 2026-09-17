@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 import java.time.LocalDate
 
 def FILTER_HELP_MESSAGE = """\

@@ -46,10 +46,14 @@ abstract class ScriptSpec extends Specification {
     List<String> inputAnswers = []
     /** Answer returned by ui.showConfirmDialog(). */
     int confirmAnswer = JOptionPane.YES_OPTION
+    /** Questions the script passed to ui.showConfirmDialog(). */
+    List<String> confirmQuestions = []
     /** Files the script passed to Utils.openInDesktop() (never opened for real). */
     List<File> openedInDesktop = []
-    /** Nodes the script passed to c.select(). */
+    /** Nodes the script passed to c.select(), flattened when it passed a collection. */
     List selectedNodes = []
+    /** The map selection c.selecteds reports; null means just the node the script runs on. */
+    List selection
     /** Argument lists of every node.map.filter() call. */
     List<List> filterCalls = []
     /** Directory c.getUserDirectory() reports; the project dir, so scripts/template.md is the real one. */
@@ -69,12 +73,18 @@ abstract class ScriptSpec extends Specification {
 
         ui = new Expando()
         ui.showInputDialog = { Object... args -> inputAnswers.isEmpty() ? null : inputAnswers.remove(0) }
-        ui.showConfirmDialog = { Object... args -> confirmAnswer }
+        ui.showConfirmDialog = { Object... args -> confirmQuestions << String.valueOf(args[1]); confirmAnswer }
         ui.errorMessage = { message -> errorMessages << String.valueOf(message) }
 
         c = new Expando()
         c.getUserDirectory = { -> userDirectory }
-        c.select = { targetNode -> selectedNodes << targetNode }
+        c.select = { target -> selectedNodes.addAll(target instanceof Collection ? target : [target]) }
+        // Only getSortedSelection(true) is modelled: the selection without the nodes
+        // that descend from another selected node.
+        c.getSortedSelection = { boolean differentSubtrees ->
+            assert differentSubtrees
+            c.selecteds.findAll { n -> !ScriptSpec.hasAncestorIn(n, c.selecteds) }
+        }
 
         // Replaces the real (headless-hostile, externally side-effecting) desktop call
         // for the duration of the feature method; undone in cleanup().
@@ -137,12 +147,21 @@ abstract class ScriptSpec extends Specification {
         return bytes.length >= 3 && bytes[0] == (byte) 0xEF && bytes[1] == (byte) 0xBB && bytes[2] == (byte) 0xBF
     }
 
+    static boolean hasAncestorIn(FakeNode node, List nodes) {
+        for (def p = node.parent; p != null; p = p.parent) {
+            if (nodes.contains(p)) return true
+        }
+        return false
+    }
+
     // --- Running the script under test ---
 
     /** Each script is compiled once per test JVM; every feature method then runs a fresh instance of it. */
     private static final Map<String, Class> SCRIPT_CLASSES = [:]
 
+    /** Runs the script with node as the focused node; c.selecteds is `selection`, or just the node. */
     def runScript(String scriptName, node) {
+        c.selecteds = selection ?: [node]
         def scriptClass = SCRIPT_CLASSES.computeIfAbsent(scriptName) { name ->
             new GroovyShell(ScriptSpec.classLoader).parse(new File('scripts', name)).class
         }

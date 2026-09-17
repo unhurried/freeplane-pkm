@@ -55,4 +55,19 @@ class AddAssetsSpec extends ScriptSpec {
         errorMessages == ['target node is not a page.']
         !new File(docDir, 'Projects.assets').exists()
     }
+
+    def "refuses to run on a multi-selection"() {
+        given:
+        writePage('Design Memo', "# Design Memo\n")
+        def node = addPageNode('Design Memo')
+        selection = [node, addPageNode('Other Memo')]
+
+        when:
+        runScript('AddAssets.groovy', node)
+
+        then:
+        errorMessages == ['select a single page to add assets to.']
+        !new File(docDir, 'Design Memo.assets').exists()
+        readPage('Design Memo') == "# Design Memo\n"
+    }
 }

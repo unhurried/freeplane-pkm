@@ -1,5 +1,9 @@
-// Opens a page node's .md file or a directory node's directory in the OS default
-// application; does nothing for any other node.
-if (Utils.getDocNodeType(node) != null) {
-    Utils.openInDesktop(Utils.getLinkedFile(node))
+// @ExecutionModes({ON_SINGLE_NODE})
+// Opens every selected page node's .md file or directory node's directory in the
+// OS default application; any other selected node is skipped.
+def docDir = Utils.loadDocDir(node)
+c.selecteds.each { n ->
+    if (Utils.getDocNodeType(n, docDir) != null) {
+        Utils.openInDesktop(Utils.getLinkedFile(n))
+    }
 }

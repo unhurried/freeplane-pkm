@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 // Manual trigger for the refresh the startup listener (init.groovy) runs periodically.
 try {
     Utils.updateNextStepsAndIndex(node)

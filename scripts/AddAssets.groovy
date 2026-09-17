@@ -1,4 +1,10 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 // Creates the page's assets directory and links it from the top of the page.
+if (c.selecteds.size() > 1) {
+    ui.errorMessage('select a single page to add assets to.')
+    return
+}
+
 def docDir = Utils.loadDocDir(node)
 if (Utils.getDocNodeType(node, docDir) != Utils.DOC_TARGET_PAGE) {
     ui.errorMessage('target node is not a page.')

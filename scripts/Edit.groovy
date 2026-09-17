@@ -1,6 +1,10 @@
+// @ExecutionModes({ON_SINGLE_NODE})
+//
 // A page or directory node is renamed on disk (and its node/link updated), since
 // editing the text alone would desynchronize the node from the file system. Any
 // other node just gets its text edited through the same input dialog.
+//
+// Renaming is a single-node operation, so a multi-selection is refused.
 //
 // The rename methods reach node and ui through the script bindings; only docDir,
 // a script-local variable, has to be passed in.
@@ -57,6 +61,11 @@ def renameDirectory(File docDir, String newName) {
 
     node.text = newName
     node.link.file = newDirectoryDir
+}
+
+if (c.selecteds.size() > 1) {
+    ui.errorMessage('select a single node to edit.')
+    return
 }
 
 def docNodeType = Utils.getDocNodeType(node)

@@ -1,3 +1,4 @@
+// @ExecutionModes({ON_SINGLE_NODE})
 import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JDialog

@@ -37,4 +37,21 @@ class OpenSpec extends ScriptSpec {
         errorMessages.isEmpty()
         openedInDesktop.isEmpty()
     }
+
+    def "opens every page and directory in the selection, skipping other nodes"() {
+        given:
+        writePage('Design Memo')
+        makeDir('Projects')
+        def page = addPageNode('Design Memo')
+        def directory = addDirectoryNode('Projects')
+        def plain = addChild(rootNode, text: 'plain node')
+        selection = [page, plain, directory]
+
+        when:
+        runScript('Open.groovy', page)
+
+        then:
+        errorMessages.isEmpty()
+        openedInDesktop == [new File(docDir, 'Design Memo.md'), new File(docDir, 'Projects')]
+    }
 }
