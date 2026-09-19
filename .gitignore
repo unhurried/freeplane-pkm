@@ -1,4 +1,6 @@
 build/
 .gradle/
 .claude/settings.local.json
+# Per-developer copy of .devcontainer/.env.example
+.devcontainer/.env
 *.hprof

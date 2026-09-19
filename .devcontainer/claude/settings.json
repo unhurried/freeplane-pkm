@@ -1,11 +1,10 @@
 {
-  "autoUpdates": true,
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Write",
       "Edit",
       "Bash(git:*)",
-      "Bash(gradle:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(grep:*)",
@@ -24,29 +23,31 @@
       "WebFetch(domain:docs.github.com)",
       "WebFetch(domain:docs.python.org)"
     ],
-    "deny": [],
     "ask": [
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(sudo:*)"
     ]
   },
   "sandbox": {
     "enabled": true,
-    "network": {
-      "allowedDomains": [
-        "docs.github.com",
-        "docs.python.org"
-      ]
-    },
-    "filesystem": {
-      "allowWrite": [
-        "~/.gradle"
-      ]
-    },
     "credentials": {
       "files": [
-        { "path": "~/.ssh", "mode": "deny" },
-        { "path": "~/.aws/credentials", "mode": "deny" }
+        {
+          "path": "~/.ssh",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.aws/credentials",
+          "mode": "deny"
+        }
       ]
     }
+  },
+  "worktree": {
+    "baseRef": "head"
+  },
+  "autoUpdates": true,
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
   }
 }

@@ -2,6 +2,13 @@
   "worktree": {
     "baseRef": "head"
   },
+  "sandbox": {
+    "filesystem": {
+      "allowWrite": [
+        "~/.gradle"
+      ]
+    }
+  },
   "permissions": {
     "allow": [
       "Bash(gradle:*)",

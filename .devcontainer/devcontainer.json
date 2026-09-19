@@ -1,51 +1,78 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/universal
 {
-	"name": "Default Linux Universal",
-	// Built from a Dockerfile so we can layer in packages Claude Code needs (e.g. bubblewrap for its sandbox).
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
-	"features": {
-		// The JDK is installed by the official java feature instead of by gradle-sdkman:
-		// gradle-sdkman hardcodes java:1.2.1, whose SDKMAN version regex only accepts
-		// identifiers like "17.0.15-ms" and rejects the "+<build>" ones SDKMAN now
-		// publishes for every Microsoft JDK (17.0.20+1-ms), so the install failed with
-		// "Version 17 not found. Available versions:" (empty). java:1 (>= 1.8.x) is fixed.
-		"ghcr.io/devcontainers/features/java:1": {
-			// Pinned to match the Java version used by the Package Add-on CI workflow
-			// (.github/workflows/package-addon.yml) and supported by Freeplane's bundled
-			// JRE. "latest" previously installed JDK 25, which compiles to class file
-			// version 69 -- newer than Freeplane's runtime can load (max 65, Java 21),
-			// causing UnsupportedClassVersionError when running a locally built add-on.
-			"version": "17",
-			"jdkDistro": "ms"
-		},
-		"ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {
-			"version": "latest",
-			// The JDK comes from the java feature above.
-			"jdkVersion": "none"
-		},
-		"ghcr.io/devcontainers/features/copilot-cli:1": {
-			"version": "latest"
-		}
-		// Claude Code is installed natively in postCreateCommand (see scripts/post-create.sh)
-		// instead of via this feature, because installing through the feature disables
-		// Claude Code's built-in auto-update mechanism.
-		// "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
-	},
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-	// Installs Claude Code natively, the shared settings, and a hardened .npmrc into the container user's home.
-	"postCreateCommand": "bash .devcontainer/scripts/post-create.sh ${containerWorkspaceFolder}",
-	"customizations": {
-		"vscode": {
-			"settings": {
-				"terminal.integrated.defaultProfile.linux": "bash",
-				"security.workspace.trust.enabled": false
-			}
-		}
-	}
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+  "name": "freeplane-pkm",
+  // Compose so the dev service sits on an internal network and only the proxy reaches
+  // the internet (see docker-compose.yml).
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/freeplane-pkm",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  // Persist state and download caches across rebuilds. Declared here, not in
+  // docker-compose.yml: ${devcontainerId} only resolves here. The mount points are
+  // created in the Dockerfile so they are vscode-owned. A target must hold only
+  // regenerable cache: a volume also masks any file its owner writes just once.
+  "mounts": [
+    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=claude-code-playwright-${devcontainerId},target=/home/vscode/.cache/ms-playwright,type=volume",
+    "source=claude-code-npm-${devcontainerId},target=/home/vscode/.npm,type=volume",
+    // extensions/ only: a volume over data/ would freeze customizations.vscode.settings
+    // at the first create. See README (Rebuilds).
+    "source=claude-code-vscode-extensions-${devcontainerId},target=/home/vscode/.vscode-server/extensions,type=volume",
+    "source=claude-code-local-${devcontainerId},target=/home/vscode/.local,type=volume",
+    // Gradle's dependency cache and its proxy settings (post-create.sh).
+    "source=claude-code-gradle-${devcontainerId},target=/home/vscode/.gradle,type=volume"
+  ],
+  // Pinned so a rebuild does not silently pull a new major version. Bump deliberately.
+  "features": {
+    // The JDK is installed by the official java feature instead of by gradle-sdkman:
+    // gradle-sdkman hardcodes java:1.2.1, whose SDKMAN version regex only accepts
+    // identifiers like "17.0.15-ms" and rejects the "+<build>" ones SDKMAN now
+    // publishes for every Microsoft JDK (17.0.20+1-ms), so the install failed with
+    // "Version 17 not found. Available versions:" (empty). java:1 (>= 1.8.x) is fixed.
+    "ghcr.io/devcontainers/features/java:1": {
+      // Pinned to match the Java version used by the Package Add-on CI workflow
+      // (.github/workflows/package-addon.yml) and supported by Freeplane's bundled
+      // JRE. "latest" previously installed JDK 25, which compiles to class file
+      // version 69 -- newer than Freeplane's runtime can load (max 65, Java 21),
+      // causing UnsupportedClassVersionError when running a locally built add-on.
+      "version": "17",
+      "jdkDistro": "ms"
+    },
+    "ghcr.io/devcontainers-extra/features/gradle-sdkman:2": {
+      "version": "latest",
+      // The JDK comes from the java feature above.
+      "jdkVersion": "none"
+    },
+    // Node for the Playwright MCP server (post-create.sh).
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "26.8.1"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.14.7"
+    },
+    // Unpinned: apt drops old moby versions, so an exact pin breaks over time.
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
+      "version": "latest",
+      "moby": true
+    }
+    // Claude Code is installed by post-create.sh (native installer), not by the
+    // feature: the feature's npm install cannot auto-update here.
+  },
+  "postCreateCommand": "bash .devcontainer/scripts/post-create.sh ${containerWorkspaceFolder}",
+  // Fails the start only on a real isolation failure, then syncs the Claude Code config
+  // so edits to .devcontainer/claude/ need no rebuild.
+  "postStartCommand": "bash .devcontainer/scripts/verify-isolation.sh && bash .devcontainer/scripts/sync-claude-config.sh ${containerWorkspaceFolder}",
+  "waitFor": "postStartCommand",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "security.workspace.trust.enabled": false
+      }
+    }
+  }
 }

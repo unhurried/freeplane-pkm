@@ -1,0 +1,86 @@
+name: freeplane-pkm
+
+networks:
+  # internal: true means no gateway, so nothing can leave this network.
+  # That is the isolation -- not iptables.
+  isolated:
+    internal: true
+  egress:
+
+services:
+  proxy:
+    build:
+      context: ./proxy
+    # The service name is its DNS name on both networks; dev reaches it as `proxy`.
+    networks:
+      - isolated
+      - egress
+    restart: unless-stopped
+    # Only what entrypoint.sh (log setup as root) and squid (dropping to its own user) need.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # See .env.example.
+      PROXY_MODE: &proxy_mode ${PROXY_MODE:-allowlist}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3128"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      # dev waits on this; squid is up well under a second, so probe quickly at first.
+      start_period: 5s
+      start_interval: 1s
+
+  dev:
+    build:
+      context: .
+    # Required by docker-in-docker. Safe: this network still has no route out.
+    privileged: true
+    networks:
+      - isolated
+    depends_on:
+      proxy:
+        condition: service_healthy
+    # Chromium (Playwright MCP) crashes with the default 64MB /dev/shm.
+    shm_size: 1gb
+    # Keeps the service up; devcontainer.json does not override the command for compose.
+    command: sleep infinity
+    environment:
+      # All env vars live here, not in devcontainer.json's containerEnv.
+      #
+      # Keeps .claude.json inside the persisted ~/.claude volume.
+      CLAUDE_CONFIG_DIR: /home/vscode/.claude
+      # Read only by verify-isolation.sh.
+      PROXY_MODE: *proxy_mode
+      # For /voice; see the bind mount below.
+      PULSE_SERVER: unix:/mnt/wslg/PulseServer
+      # Keeps Sentry and Statsig out of the allowlist. Not
+      # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: that would also disable auto-updates.
+      DISABLE_ERROR_REPORTING: "1"
+      DISABLE_TELEMETRY: "1"
+      # As env vars so they apply everywhere, including `npm install -g`.
+      # ignore-scripts: no install-time scripts. min-release-age: no versions under 7 days old.
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+      NPM_CONFIG_MIN_RELEASE_AGE: "7"
+      # sync-claude-config.sh reads HTTPS_PROXY to hand the proxy to Chromium.
+      HTTP_PROXY: &proxy_url http://proxy:3128
+      HTTPS_PROXY: *proxy_url
+      http_proxy: *proxy_url
+      https_proxy: *proxy_url
+      # Private ranges keep containers started by the inner docker daemon reachable.
+      NO_PROXY: &no_proxy localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      no_proxy: *no_proxy
+    volumes:
+      # Named volumes are in devcontainer.json: ${devcontainerId} only resolves there.
+      - ..:/workspaces/freeplane-pkm:cached
+      # Host PulseAudio socket for /voice (VS Code forwards no audio). Defaults to
+      # /dev/null because a missing bind source fails the start. Set in .env.
+      - ${VOICE_PULSE_SOCKET:-/dev/null}:/mnt/wslg/PulseServer
