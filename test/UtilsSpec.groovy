@@ -359,6 +359,29 @@ class UtilsSpec extends ScriptSpec {
         unchangedNode.children == [existingChild]
     }
 
+    // Freeplane doesn't filter nodes a script creates in the active map view, so
+    // new children of a page the filter hides would show up hanging off the root.
+    // The reapply lands in the same EDT batch as the children, so it has happened
+    // once expectNextSteps sees them.
+    def "updateAllNextSteps reapplies the map's filter once after creating Next Steps children"() {
+        given:
+        pageNode('Other', "### Next Steps\n\n* Other step\n")
+
+        expect:
+        expectNextSteps("### Next Steps\n\n* First step\n", ['First step'])
+        filterReapplications == [mindMap]
+    }
+
+    def "updateAllNextSteps leaves the filter alone when it creates no node"() {
+        given:
+        def unchangedNode = pageNode('Unchanged', "### Next Steps\n\n* Same step\n", ['Same step'])
+
+        expect:
+        expectNextSteps("### Next Steps\n", [], ['Gone step'])
+        unchangedNode.children*.text == ['Same step']
+        filterReapplications.isEmpty()
+    }
+
     // --- Tests for the ToDo cleanup of updateAllNextSteps ---
 
     /** A ToDo item the way AddToToDo creates it: "item (page)" linking <docDir>/<page>.md. */

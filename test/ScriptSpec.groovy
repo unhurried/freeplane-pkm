@@ -50,6 +50,8 @@ abstract class ScriptSpec extends Specification {
     List<String> confirmQuestions = []
     /** Files the script passed to Utils.openInDesktop() (never opened for real). */
     List<File> openedInDesktop = []
+    /** Maps passed to Utils.reapplyFilter() (which needs Freeplane's FilterController). */
+    List filterReapplications = []
     /** Nodes the script passed to c.select(), flattened when it passed a collection. */
     List selectedNodes = []
     /** The map selection c.selecteds reports; null means just the node the script runs on. */
@@ -87,8 +89,10 @@ abstract class ScriptSpec extends Specification {
         }
 
         // Replaces the real (headless-hostile, externally side-effecting) desktop call
-        // for the duration of the feature method; undone in cleanup().
+        // and the Freeplane-only filter call for the duration of the feature method;
+        // undone in cleanup().
         Utils.metaClass.static.openInDesktop = { File file -> openedInDesktop << file }
+        Utils.metaClass.static.reapplyFilter = { map -> filterReapplications << map }
     }
 
     def cleanup() {

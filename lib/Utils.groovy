@@ -221,7 +221,8 @@ def static updateNextStepsAndIndex(node) {
  * children, so an unchanged map stays untouched (and unmodified).
  */
 def static updateAllNextSteps(node, File docDir = null) {
-    def root = node.mindMap.root
+    def map = node.mindMap
+    def root = map.root
     def dir = docDir ?: loadDocDir(root)
     def targets = collectNodes(root)
 
@@ -236,15 +237,40 @@ def static updateAllNextSteps(node, File docDir = null) {
         }
         def staleToDoItems = collectStaleToDoItems(root, dir, itemsByFile)
         SwingUtilities.invokeLater {
-            nextSteps.each { target, lines ->
-                if (target.children*.text != lines) applyNextSteps(target, lines)
-            }
+            def changed = nextSteps.findAll { target, lines -> target.children*.text != lines }
+            changed.each { target, lines -> applyNextSteps(target, lines) }
             staleToDoItems*.delete()
+            // Only creating nodes leaves the filter stale (see reapplyFilter).
+            if (changed.any { target, lines -> lines }) reapplyFilter(map)
         }
     }
 }
 
+/**
+ * Re-applies the map's current filter, the way the built-in "Reapply filter"
+ * action does. Freeplane computes a filter result for a newly created node
+ * only in map views other than the active one; an unchecked node counts as
+ * visible, so a Next Steps child created under a page the filter hides (an
+ * archived page under the archive filter, any page under the ToDo filter)
+ * would be drawn hanging off its nearest visible ancestor, usually the root.
+ * Lives here, not inline, so specs can replace it: FilterController and
+ * Controller exist only inside Freeplane, hence the reflective lookups.
+ */
+def static reapplyFilter(map) {
+    def mapModel = map.delegate
+    def selection = freeplaneClass('org.freeplane.features.mode.Controller').currentController.selection
+    // Only the active map view needs it, and only while a filter is on.
+    if (selection?.map != mapModel || selection.filter?.condition == null) return
+    freeplaneClass('org.freeplane.features.filter.FilterController').currentFilterController
+            .applyFilter(mapModel, true, selection.filter)
+}
+
 // --- Private helper methods ---
+
+/** A Freeplane class, resolved at runtime because Freeplane isn't a build dependency. */
+private static Class freeplaneClass(String name) {
+    return Class.forName(name, true, Utils.classLoader)
+}
 
 private static void eachNode(node, Closure action) {
     action(node)
