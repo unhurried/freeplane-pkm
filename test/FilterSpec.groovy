@@ -20,6 +20,7 @@ class FilterSpec extends ScriptSpec {
         def archive = addChild(rootNode, text: 'Archive')
         def archived = addChild(addChild(archive, text: 'old project'), text: 'note')
         def visible = addChild(rootNode, text: 'current project')
+        inputAnswers << ''
 
         when:
         runScript('Filter.groovy', rootNode)
@@ -29,6 +30,17 @@ class FilterSpec extends ScriptSpec {
         !lastPredicate().call(archive)
         !lastPredicate().call(archived)
         lastPredicate().call(visible)
+    }
+
+    def "cancelling the dialog leaves the current filter untouched"() {
+        given:
+        // no inputAnswers queued: the fake ui.showInputDialog returns null, like a real Esc/Cancel
+
+        when:
+        runScript('Filter.groovy', rootNode)
+
+        then:
+        filterCalls.isEmpty()
     }
 
     def "the 'a' command shows every node"() {

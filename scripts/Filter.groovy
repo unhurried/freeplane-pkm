@@ -19,7 +19,9 @@ def isUnderArchive = { n ->
     false
 }
 
-if (!keyword) {
+if (keyword == null) {
+    // dialog was cancelled (Esc or Cancel button): leave the current filter as is
+} else if (keyword.isEmpty()) {
     node.map.filter() { !isUnderArchive(it) }
 } else if (keyword == 'a') {
     node.map.filter(true, true) { true }
