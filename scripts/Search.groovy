@@ -1,6 +1,7 @@
 // @ExecutionModes({ON_SINGLE_NODE})
 import javax.swing.BorderFactory
 import javax.swing.JButton
+import javax.swing.JComboBox
 import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JMenuItem
@@ -10,6 +11,7 @@ import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.JTextField
 import javax.swing.SwingUtilities
+import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -28,6 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 // selected and centered instead.
 
 def UPDATING_INDEX_STATUS = 'Updating search index...'
+// Combo box labels in display order; the first entry is the default.
+def SORT_OPTIONS = ['Last modified (newest first)': SearchSort.MODIFIED, 'Relevance': SearchSort.RELEVANCE]
+def SCOPE_OPTIONS = ['Pages': SearchScope.PAGES, 'Attachments': SearchScope.ASSETS, 'Pages and attachments': SearchScope.ALL]
 
 def docDir
 try {
@@ -77,24 +82,33 @@ if (existingDialog) {
     return
 }
 
-def columnNames = ['File', 'Node', 'Snippet'] as String[]
+def columnNames = ['File', 'Modified', 'Node', 'Snippet'] as String[]
+def columnWidths = [200, 110, 180, 320]
+def MODIFIED_COLUMN = columnNames.findIndexOf { it == 'Modified' }
 def tableModel = new DefaultTableModel(columnNames, 0) {
     boolean isCellEditable(int row, int col) { false }
+
+    // Dates, so the column sorter orders them chronologically whatever the display format.
+    Class getColumnClass(int col) { col == MODIFIED_COLUMN ? Date : String }
 }
 def currentHits = []
 def currentNodes = []
 
 def keywordField = new JTextField(30)
 def searchButton = new JButton('Search')
+def sortCombo = new JComboBox(SORT_OPTIONS.keySet() as String[])
+def scopeCombo = new JComboBox(SCOPE_OPTIONS.keySet() as String[])
 def statusLabel = new JLabel(' ')
 def openFileButton = new JButton('Open File')
 def selectNodeButton = new JButton('Select Node')
 def table = new JTable(tableModel)
 table.rowHeight = 22
 table.autoCreateRowSorter = true
-table.columnModel.getColumn(0).preferredWidth = 200
-table.columnModel.getColumn(1).preferredWidth = 180
-table.columnModel.getColumn(2).preferredWidth = 320
+columnWidths.eachWithIndex { width, i -> table.columnModel.getColumn(i).preferredWidth = width }
+def modifiedPattern = Utils.DATE_FORMAT + ' HH:mm'
+table.columnModel.getColumn(MODIFIED_COLUMN).cellRenderer = new DefaultTableCellRenderer() {
+    protected void setValue(Object value) { super.setValue(value ? ((Date) value).format(modifiedPattern) : '') }
+}
 
 def updateActionButtons = {
     def viewRow = table.selectedRow
@@ -111,20 +125,27 @@ def showHits = { List hits, List nodes, List nodePaths ->
 
     tableModel.rowCount = 0
     hits.eachWithIndex { hit, i ->
-        tableModel.addRow([hit.relativePath, nodePaths[i], hit.snippet] as Object[])
+        tableModel.addRow([hit.relativePath, new Date(hit.lastModified), nodePaths[i], hit.snippet] as Object[])
     }
     statusLabel.text = hits.isEmpty() ? 'No results' : "${hits.size()} result(s)"
     updateActionButtons()
 }
 
+// Off while a search runs, so changing sort/scope can't start overlapping searches.
+def setSearchControlsEnabled = { boolean enabled ->
+    [searchButton, sortCombo, scopeCombo].each { it.enabled = enabled }
+}
+
 def runSearch = {
     def keywordText = keywordField.text
-    searchButton.enabled = false
+    def sort = SORT_OPTIONS[sortCombo.selectedItem]
+    def scope = SCOPE_OPTIONS[scopeCombo.selectedItem]
+    setSearchControlsEnabled(false)
     statusLabel.text = 'Searching...'
     Thread.start {
         List hits
         try {
-            hits = SearchIndex.search(docDir, keywordText)
+            hits = SearchIndex.search(docDir, keywordText, sort, scope)
         } catch (Exception e) {
             hits = []
             SwingUtilities.invokeLater { statusLabel.text = "search failed: ${e.message}" }
@@ -145,7 +166,7 @@ def runSearch = {
 
         SwingUtilities.invokeLater {
             showHits(hits, nodes, nodePaths)
-            searchButton.enabled = true
+            setSearchControlsEnabled(true)
         }
     }
 }
@@ -188,6 +209,10 @@ def selectHitNode = {
 
 searchButton.addActionListener { runSearch() }
 keywordField.addActionListener { runSearch() }
+// Re-run with the new order/filter, unless there is nothing to search for yet.
+def rerunSearch = { if (keywordField.text.trim()) runSearch() }
+sortCombo.addActionListener { rerunSearch() }
+scopeCombo.addActionListener { rerunSearch() }
 openFileButton.addActionListener { openSelectedHit() }
 selectNodeButton.addActionListener { selectHitNode() }
 table.selectionModel.addListSelectionListener { updateActionButtons() }
@@ -233,7 +258,13 @@ table.addKeyListener(new KeyAdapter() {
 def searchPanel = new JPanel(new BorderLayout(4, 4))
 searchPanel.add(new JLabel('Keyword: '), BorderLayout.WEST)
 searchPanel.add(keywordField, BorderLayout.CENTER)
-searchPanel.add(searchButton, BorderLayout.EAST)
+def searchOptionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0))
+searchOptionsPanel.add(new JLabel('Show:'))
+searchOptionsPanel.add(scopeCombo)
+searchOptionsPanel.add(new JLabel('Sort:'))
+searchOptionsPanel.add(sortCombo)
+searchOptionsPanel.add(searchButton)
+searchPanel.add(searchOptionsPanel, BorderLayout.EAST)
 
 def actionButtonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0))
 actionButtonsPanel.add(openFileButton)

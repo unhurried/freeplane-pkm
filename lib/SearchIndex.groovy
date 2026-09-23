@@ -16,6 +16,7 @@ import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field.Store
+import org.apache.lucene.document.NumericDocValuesField
 import org.apache.lucene.document.StoredField
 import org.apache.lucene.document.StringField
 import org.apache.lucene.document.TextField
@@ -28,6 +29,9 @@ import org.apache.lucene.search.BooleanQuery
 import org.apache.lucene.search.BoostQuery
 import org.apache.lucene.search.IndexSearcher
 import org.apache.lucene.search.Query
+import org.apache.lucene.search.Sort
+import org.apache.lucene.search.SortField
+import org.apache.lucene.search.TermQuery
 import org.apache.lucene.search.highlight.Highlighter
 import org.apache.lucene.search.highlight.QueryScorer
 import org.apache.lucene.search.highlight.SimpleFragmenter
@@ -53,7 +57,7 @@ import org.apache.poi.extractor.ExtractorFactory
 // tokens no longer match; updateIndex() then rebuilds the index from scratch
 // instead of incrementally. SearchIndexSpec pins the current tokenization, so
 // forgetting the bump fails the build.
-@Field static final int INDEX_SCHEMA_VERSION = 2
+@Field static final int INDEX_SCHEMA_VERSION = 3
 
 @Field private static final String LUCENE_SUBDIR_NAME = 'lucene'
 @Field private static final String META_FILE_NAME = 'files.meta'
@@ -65,6 +69,10 @@ import org.apache.poi.extractor.ExtractorFactory
 // The leading part of the content, stored for snippets; FIELD_CONTENT itself is
 // only indexed, so a search never has to load a whole document per hit.
 @Field private static final String FIELD_PREVIEW = 'preview'
+// SearchScope.kind of the file (see Utils.isPagePath), for scope filtering.
+@Field private static final String FIELD_KIND = 'kind'
+// The file's mtime: doc values for sorting, stored for SearchHit.lastModified.
+@Field private static final String FIELD_MODIFIED = 'modified'
 // A file whose name matches ranks above one that merely mentions the keyword.
 @Field private static final Map<String, Float> SEARCH_FIELD_BOOSTS = [(FIELD_FILENAME): 2.0f, (FIELD_CONTENT): 1.0f]
 
@@ -90,13 +98,32 @@ import org.apache.poi.extractor.ExtractorFactory
 
 /**
  * One search result: the matched file, its path relative to the document
- * directory (forward-slash separated, as stored in the index), and a content
- * snippet around the match (empty when the file only matched by name).
+ * directory (forward-slash separated, as stored in the index), its mtime when
+ * it was indexed, and a content snippet around the match (empty when the file
+ * only matched by name).
  */
 class SearchHit {
     File file
     String relativePath
+    long lastModified
     String snippet
+}
+
+/** Result order: newest mtime first, or best match first. */
+enum SearchSort { MODIFIED, RELEVANCE }
+
+/**
+ * Which files a search returns; see Utils.isPagePath for what counts as a page.
+ * kind is the value indexed per file, null for the unfiltered ALL.
+ */
+enum SearchScope {
+    PAGES('page'), ASSETS('asset'), ALL(null)
+
+    final String kind
+
+    SearchScope(String kind) { this.kind = kind }
+
+    static SearchScope of(String relPath) { Utils.isPagePath(relPath) ? PAGES : ASSETS }
 }
 
 /**
@@ -173,7 +200,7 @@ def static void updateIndex(File docDir) {
             if (rebuild) writer.deleteAll()
 
             changedFiles.each { relPath, file ->
-                writer.updateDocument(new Term(FIELD_PATH, relPath), toDocument(file, relPath))
+                writer.updateDocument(new Term(FIELD_PATH, relPath), toDocument(file, relPath, currentMTimes[relPath]))
             }
             deletedPaths.each { relPath ->
                 writer.deleteDocuments(new Term(FIELD_PATH, relPath))
@@ -188,20 +215,24 @@ def static void updateIndex(File docDir) {
 
 /**
  * Files matching every whitespace-separated keyword (AND, case-insensitive) in
- * content or file name. Keywords are literal text, never query syntax. Empty
- * when the index doesn't exist yet or no keyword tokenizes to anything.
+ * content or file name, restricted to scope and ordered by sort. Both apply in
+ * the query itself, so maxResults is the top of the filtered, sorted list.
+ * Keywords are literal text, never query syntax. Empty when the index doesn't
+ * exist yet or no keyword tokenizes to anything.
  */
-def static List<SearchHit> search(File docDir, String queryText, int maxResults = DEFAULT_MAX_RESULTS) {
+def static List<SearchHit> search(File docDir, String queryText, SearchSort sort = SearchSort.RELEVANCE,
+                                  SearchScope scope = SearchScope.ALL, int maxResults = DEFAULT_MAX_RESULTS) {
     def keywords = queryText?.tokenize() ?: []
     if (!keywords) return []
 
     def indexDir = luceneDir(docDir)
     if (!indexDir.exists()) return []
 
-    def query = andQuery(keywords)
-    if (!query) return []
+    def keywordQuery = andQuery(keywords)
+    if (!keywordQuery) return []
+    def query = withScope(keywordQuery, scope)
 
-    def highlighter = new Highlighter(new SimpleHTMLFormatter('', ''), new QueryScorer(query))
+    def highlighter = new Highlighter(new SimpleHTMLFormatter('', ''), new QueryScorer(keywordQuery))
     highlighter.textFragmenter = new SimpleFragmenter(SNIPPET_CHARS)
 
     // A reader per search costs milliseconds on a personal-sized index and always
@@ -209,7 +240,10 @@ def static List<SearchHit> search(File docDir, String queryText, int maxResults 
     return FSDirectory.open(indexDir.toPath()).withCloseable { directory ->
         DirectoryReader.open(directory).withCloseable { reader ->
             def searcher = new IndexSearcher(reader)
-            searcher.search(query, maxResults).scoreDocs.collect { scoreDoc ->
+            def topDocs = sort == SearchSort.MODIFIED ?
+                    searcher.search(query, maxResults, new Sort(new SortField(FIELD_MODIFIED, SortField.Type.LONG, true))) :
+                    searcher.search(query, maxResults)
+            topDocs.scoreDocs.collect { scoreDoc ->
                 toHit(searcher.doc(scoreDoc.doc), highlighter, docDir)
             }
         }
@@ -289,13 +323,16 @@ private static boolean indexExists(File indexDir) {
     return FSDirectory.open(indexDir.toPath()).withCloseable { directory -> DirectoryReader.indexExists(directory) }
 }
 
-private static Document toDocument(File file, String relPath) {
+private static Document toDocument(File file, String relPath, long mtime) {
     def text = extractText(file)
     def doc = new Document()
     doc.add(new StringField(FIELD_PATH, relPath, Store.YES))
     doc.add(new TextField(FIELD_FILENAME, file.name, Store.YES))
     doc.add(new TextField(FIELD_CONTENT, text, Store.NO))
     doc.add(new StoredField(FIELD_PREVIEW, text.take(PREVIEW_CHARS)))
+    doc.add(new StringField(FIELD_KIND, SearchScope.of(relPath).kind, Store.NO))
+    doc.add(new NumericDocValuesField(FIELD_MODIFIED, mtime))
+    doc.add(new StoredField(FIELD_MODIFIED, mtime))
     return doc
 }
 
@@ -347,6 +384,15 @@ private static Query andQuery(List<String> keywords) {
     return booleanQuery(Occur.MUST, keywordQueries)
 }
 
+/** Restricts query to the scope's kind of file, without affecting scores. */
+private static Query withScope(Query query, SearchScope scope) {
+    if (!scope.kind) return query
+    return new BooleanQuery.Builder()
+            .add(query, Occur.MUST)
+            .add(new TermQuery(new Term(FIELD_KIND, scope.kind)), Occur.FILTER)
+            .build()
+}
+
 /** Combines the non-null clauses with the given occurrence; null when there is none. */
 private static Query booleanQuery(Occur occur, List<Query> clauses) {
     def present = clauses.findAll()
@@ -361,6 +407,7 @@ private static SearchHit toHit(Document doc, Highlighter highlighter, File docDi
     return new SearchHit(
             file: new File(docDir, relPath),
             relativePath: relPath,
+            lastModified: doc.getField(FIELD_MODIFIED).numericValue().longValue(),
             snippet: bestSnippet(highlighter, doc.get(FIELD_PREVIEW) ?: ''))
 }
 

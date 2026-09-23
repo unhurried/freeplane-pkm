@@ -128,6 +128,20 @@ class UtilsSpec extends ScriptSpec {
         Utils.pageFileOfAssetsDir(new File(docDir, 'Page')) == null
     }
 
+    def "isPagePath accepts only page files outside assets directories"() {
+        expect:
+        Utils.isPagePath(relPath) == expected
+
+        where:
+        relPath                | expected
+        'Page.md'              | true
+        'Dir/Page.md'          | true
+        'assets.md'            | true
+        'Page.assets/Note.md'  | false
+        'Page.assets/sub/x.md' | false
+        'Page.pdf'             | false
+    }
+
     // --- Tests for collectNodesByLinkedFile ---
 
     def "collectNodesByLinkedFile maps every linked file in the tree to its node"() {

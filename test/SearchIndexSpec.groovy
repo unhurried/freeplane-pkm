@@ -24,6 +24,7 @@ class SearchIndexSpec extends Specification {
 
     private File textFile(String name, String content) {
         def file = new File(docDir, name)
+        file.parentFile.mkdirs()
         file.text = content
         return file
     }
@@ -316,13 +317,70 @@ class SearchIndexSpec extends Specification {
     // Pins the tokenization an existing on-disk index was built with. If this
     // fails because the analyzer changed on purpose, bump INDEX_SCHEMA_VERSION
     // (so users' indexes get rebuilt) and update the expected tokens together.
-    def "the indexed tokens are unchanged for schema version 2"() {
+    def "the indexed tokens are unchanged for schema version 3"() {
         expect:
-        SearchIndex.INDEX_SCHEMA_VERSION == 2
+        SearchIndex.INDEX_SCHEMA_VERSION == 3
         SearchIndex.tokenize(SearchIndex.FIELD_CONTENT, '東京都で本を読んだ。Ｃｏｍｐｕｔｅｒ コンピューター QuarterlyReport2024') ==
                 ['東京', '都', 'で', '本', 'を', '読む', 'だ', 'computer', 'コンピュータ', 'quarterlyreport', '2024']
         SearchIndex.tokenize(SearchIndex.FIELD_FILENAME, 'QuarterlyReport2024.md 関西国際空港') ==
                 ['quarterly', 'report', '2024', 'md', '関西', '国際', '空港']
+    }
+
+    // --- Tests for sorting and scope ---
+
+    def "search orders hits by modification time, newest first, when sorting by MODIFIED"() {
+        given:
+        textFile('Old.md', 'mountains').lastModified = 1_000_000L
+        textFile('New.md', 'mountains').lastModified = 3_000_000L
+        textFile('Mid.md', 'mountains').lastModified = 2_000_000L
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, 'mountains', SearchSort.MODIFIED)
+
+        then:
+        hits*.relativePath == ['New.md', 'Mid.md', 'Old.md']
+        hits*.lastModified == [3_000_000L, 2_000_000L, 1_000_000L]
+    }
+
+    def "search puts the best match first when sorting by RELEVANCE, regardless of modification time"() {
+        given: 'the file-name match is the older one'
+        textFile('Mountains.md', 'mountains').lastModified = 1_000_000L
+        textFile('Other.md', 'mountains').lastModified = 2_000_000L
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, 'mountains', SearchSort.RELEVANCE)*.relativePath == ['Mountains.md', 'Other.md']
+        SearchIndex.search(docDir, 'mountains', SearchSort.MODIFIED)*.relativePath == ['Other.md', 'Mountains.md']
+    }
+
+    def "search restricts hits to pages, attachments, or both by scope"() {
+        given:
+        textFile('Page.md', 'mountains')
+        textFile('Dir/Nested.md', 'mountains')
+        textFile('Page.assets/Note.md', 'mountains')
+        textFile('Page.assets/Data.txt', 'mountains')
+        pdfFile('Loose.pdf', 'mountains')
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, 'mountains', SearchSort.RELEVANCE, scope)*.relativePath.sort() == expected
+
+        where:
+        scope              | expected
+        SearchScope.PAGES  | ['Dir/Nested.md', 'Page.md']
+        SearchScope.ASSETS | ['Loose.pdf', 'Page.assets/Data.txt', 'Page.assets/Note.md']
+        SearchScope.ALL    | ['Dir/Nested.md', 'Loose.pdf', 'Page.assets/Data.txt', 'Page.assets/Note.md', 'Page.md']
+    }
+
+    def "search applies scope before cutting to maxResults"() {
+        given:
+        (1..3).each { textFile("Page.assets/A${it}.txt", 'mountains') }
+        textFile('Page.md', 'mountains')
+        SearchIndex.updateIndex(docDir)
+
+        expect:
+        SearchIndex.search(docDir, 'mountains', SearchSort.RELEVANCE, SearchScope.PAGES, 1)*.relativePath == ['Page.md']
     }
 
     def "search returns no results for an unindexed document directory"() {

@@ -84,6 +84,15 @@ def static String pageNameOf(File file) {
     return file.name.endsWith(PAGE_SUFFIX) ? file.name - PAGE_SUFFIX : null
 }
 
+/**
+ * Whether a path relative to the document directory is a page: a <name>.md file
+ * outside any "<page>.assets/" directory. Everything else is an attachment.
+ */
+def static boolean isPagePath(String relPath) {
+    def segments = relPath.tokenize('/')
+    return segments.last().endsWith(PAGE_SUFFIX) && !segments.init().any { it.endsWith(ASSETS_SUFFIX) }
+}
+
 /** The page file an assets directory belongs to, or null when the name has no ".assets" suffix. */
 def static File pageFileOfAssetsDir(File assetsDir) {
     if (!assetsDir.name.endsWith(ASSETS_SUFFIX)) return null
