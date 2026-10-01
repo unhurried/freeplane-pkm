@@ -32,6 +32,7 @@ import org.apache.lucene.search.Query
 import org.apache.lucene.search.Sort
 import org.apache.lucene.search.SortField
 import org.apache.lucene.search.TermQuery
+import org.apache.lucene.search.highlight.Encoder
 import org.apache.lucene.search.highlight.Highlighter
 import org.apache.lucene.search.highlight.QueryScorer
 import org.apache.lucene.search.highlight.SimpleFragmenter
@@ -100,13 +101,13 @@ import org.apache.poi.extractor.ExtractorFactory
  * One search result: the matched file, its path relative to the document
  * directory (forward-slash separated, as stored in the index), its mtime when
  * it was indexed, and a content snippet around the match (empty when the file
- * only matched by name).
+ * only matched by name), HTML-escaped with each matched term wrapped in <b>...</b>.
  */
 class SearchHit {
     File file
     String relativePath
     long lastModified
-    String snippet
+    String snippetHtml
 }
 
 /** Result order: newest mtime first, or best match first. */
@@ -232,7 +233,8 @@ def static List<SearchHit> search(File docDir, String queryText, SearchSort sort
     if (!keywordQuery) return []
     def query = withScope(keywordQuery, scope)
 
-    def highlighter = new Highlighter(new SimpleHTMLFormatter('', ''), new QueryScorer(keywordQuery))
+    def highlighter = new Highlighter(new SimpleHTMLFormatter('<b>', '</b>'), { String text -> escapeHtml(text) } as Encoder,
+            new QueryScorer(keywordQuery))
     highlighter.textFragmenter = new SimpleFragmenter(SNIPPET_CHARS)
 
     // A reader per search costs milliseconds on a personal-sized index and always
@@ -408,7 +410,7 @@ private static SearchHit toHit(Document doc, Highlighter highlighter, File docDi
             file: new File(docDir, relPath),
             relativePath: relPath,
             lastModified: doc.getField(FIELD_MODIFIED).numericValue().longValue(),
-            snippet: bestSnippet(highlighter, doc.get(FIELD_PREVIEW) ?: ''))
+            snippetHtml: bestSnippet(highlighter, doc.get(FIELD_PREVIEW) ?: ''))
 }
 
 private static String bestSnippet(Highlighter highlighter, String preview) {
@@ -419,7 +421,13 @@ private static String bestSnippet(Highlighter highlighter, String preview) {
     } catch (Exception ignored) {
         // Best effort; fall through to a plain preview.
     }
-    return preview.length() > SNIPPET_CHARS ? preview.substring(0, SNIPPET_CHARS) + '…' : preview
+    return escapeHtml(preview.length() > SNIPPET_CHARS ? preview.substring(0, SNIPPET_CHARS) + '…' : preview)
+}
+
+// Only what HTML requires, unlike Lucene's SimpleHTMLEncoder, which also turns
+// every non-ASCII (e.g. Japanese) character into a numeric reference.
+private static String escapeHtml(String text) {
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 }
 
 /** [version: int, mtimes: Map]; version is -1 (never a real version) when the file is missing or unreadable. */

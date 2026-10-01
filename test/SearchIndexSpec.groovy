@@ -189,7 +189,7 @@ class SearchIndexSpec extends Specification {
 
         then:
         hits.size() == 1
-        hits[0].snippet == ''
+        hits[0].snippetHtml == ''
     }
 
     def "search returns a snippet for content matches"() {
@@ -201,7 +201,32 @@ class SearchIndexSpec extends Specification {
         def hits = SearchIndex.search(docDir, 'mountains')
 
         then:
-        hits[0].snippet.contains('mountains')
+        hits[0].snippetHtml.contains('<b>mountains</b>')
+    }
+
+    def "search marks the matched terms in an HTML-escaped snippet"() {
+        given:
+        textFile('Alpha.md', 'Fish & chips <b>near</b> the Mountains, then rivers.')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, 'mountains rivers')
+
+        then:
+        hits[0].snippetHtml ==
+                'Fish &amp; chips &lt;b&gt;near&lt;/b&gt; the <b>Mountains</b>, then <b>rivers</b>.'
+    }
+
+    def "search escapes the HTML snippet when nothing in the content matched"() {
+        given:
+        textFile('a&b.md', 'x < y')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, 'a&b')
+
+        then:
+        hits[0].snippetHtml == 'x &lt; y'
     }
 
     def "search finds Japanese content by morphological unit, not just substring"() {

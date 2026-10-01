@@ -36,13 +36,13 @@ With several nodes selected, Open, Delete and Add to ToDo act on all of them (De
 
 ## Full-Text Document Search
 
-Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a search dialog: type keywords, and matching files show up in a result list with a short content snippet. Double-click a result (or select it and press Enter) to open it with the OS default application, via `Desktop.open()`.
+Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a search dialog: type keywords, and matching files show up in a result list with a short content snippet, the matched keywords highlighted. Double-click a result (or select it and press Enter) to open it with the OS default application, via `Desktop.open()`.
 
 - **Formats**: Markdown/plain text, PDF, and current-format Office documents (`.docx`, `.xlsx`, `.pptx`). Any other file type is still searchable by file name. Legacy Office formats (`.doc`, `.xls`, `.ppt`) are not supported.
 - **Matching**: multiple space-separated keywords are combined with AND, matched case-insensitively against both file content and file name.
 - **Sorting**: the `Sort` box orders results by last-modified time, newest first (the default), or by relevance (file-name matches rank above content-only matches).
 - **Filtering**: the `Show` box limits results to pages (the default), attachments, or both. A page is a `.md` file outside any `<page>.assets/` directory; every other file - including anything under an `.assets/` directory and non-Markdown files placed directly in the document directory - counts as an attachment.
-- **Jumping to the map node**: the result list's Node column shows the mind map node (if any) that links a result's file, its containing directory, or - for a file under a page's `.assets/` directory - its page. Select it and press `Ctrl+Enter`, use the `Select Node` button, or right-click the row, to select and center that node in the map instead of opening the file.
+- **Jumping to the map node**: a result's node is the mind map node (if any) that links its file, its containing directory, or - for a file under a page's `.assets/` directory - its page. Select the result and press `Ctrl+Enter`, use the `Select Node` button, or right-click the row, to select and center that node in the map instead of opening the file.
 - **Index**: kept at `<docDir>/.search-index/` (a Lucene index plus a small file recording each indexed file's last-modified time, used to skip unchanged files on the next update). It refreshes automatically every few minutes while a map is open, and whenever the Search dialog itself opens; run Tools → Scripts → Freeplane PKM → Update Next Steps and Search Index to refresh it on demand instead of waiting.
 - This replaces the previous reliance on Windows Search / Inazuma Search - the index and search UI are entirely built into the add-on, so no external search tool needs to be installed.
 

@@ -82,9 +82,10 @@ if (existingDialog) {
     return
 }
 
-def columnNames = ['File', 'Modified', 'Node', 'Snippet'] as String[]
-def columnWidths = [200, 110, 180, 320]
+def columnNames = ['File', 'Modified', 'Snippet'] as String[]
+def columnWidths = [220, 110, 520]
 def MODIFIED_COLUMN = columnNames.findIndexOf { it == 'Modified' }
+def SNIPPET_COLUMN = columnNames.findIndexOf { it == 'Snippet' }
 def tableModel = new DefaultTableModel(columnNames, 0) {
     boolean isCellEditable(int row, int col) { false }
 
@@ -109,6 +110,14 @@ def modifiedPattern = Utils.DATE_FORMAT + ' HH:mm'
 table.columnModel.getColumn(MODIFIED_COLUMN).cellRenderer = new DefaultTableCellRenderer() {
     protected void setValue(Object value) { super.setValue(value ? ((Date) value).format(modifiedPattern) : '') }
 }
+// The cell holds SearchHit.snippetHtml; its <b> marks the matched terms. nowrap
+// keeps the snippet on the row's one line instead of wrapping it out of view, and
+// the explicit text color keeps matches readable in a selected row.
+def snippetHtmlPrefix = '<html><head><style>b { background-color: #ffe066; color: #000000 }</style></head>' +
+        '<body style="white-space: nowrap">'
+table.columnModel.getColumn(SNIPPET_COLUMN).cellRenderer = new DefaultTableCellRenderer() {
+    protected void setValue(Object value) { super.setValue(value ? snippetHtmlPrefix + value + '</body></html>' : '') }
+}
 
 def updateActionButtons = {
     def viewRow = table.selectedRow
@@ -118,14 +127,14 @@ def updateActionButtons = {
             currentNodes[table.convertRowIndexToModel(viewRow)] != null
 }
 
-// Nodes and paths are resolved on the search thread (see runSearch); this only fills the table.
-def showHits = { List hits, List nodes, List nodePaths ->
+// Nodes are resolved on the search thread (see runSearch); this only fills the table.
+def showHits = { List hits, List nodes ->
     currentHits = hits
     currentNodes = nodes
 
     tableModel.rowCount = 0
-    hits.eachWithIndex { hit, i ->
-        tableModel.addRow([hit.relativePath, new Date(hit.lastModified), nodePaths[i], hit.snippet] as Object[])
+    hits.each { hit ->
+        tableModel.addRow([hit.relativePath, new Date(hit.lastModified), hit.snippetHtml] as Object[])
     }
     statusLabel.text = hits.isEmpty() ? 'No results' : "${hits.size()} result(s)"
     updateActionButtons()
@@ -162,10 +171,9 @@ def runSearch = {
             // A hit whose node can't be resolved (map changed underneath) is still worth showing as a file.
             nodes = hits.collect { null }
         }
-        def nodePaths = nodes.collect { targetNode -> targetNode ? Utils.nodePathText(targetNode) : '' }
 
         SwingUtilities.invokeLater {
-            showHits(hits, nodes, nodePaths)
+            showHits(hits, nodes)
             setSearchControlsEnabled(true)
         }
     }
