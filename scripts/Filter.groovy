@@ -30,10 +30,8 @@ if (keyword == null) {
 } else if (keyword == 'd') {
     def today = LocalDate.now()
     node.map.filter(true, true) {
-        def dueDateStr = it.text.find(/^\d\d\/\d\d\/\d\d/)
-        if (dueDateStr == null) return false
-        def dueDate = LocalDate.parse(dueDateStr, Utils.DATE_FORMAT)
-        return !today.isBefore(dueDate)
+        def dueDate = Utils.dueDateOf(it.text)
+        return dueDate != null && !today.isBefore(dueDate)
     }
 } else {
     def lowerKeyword = keyword.toLowerCase()

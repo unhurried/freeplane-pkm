@@ -1,3 +1,4 @@
+import java.time.LocalDate
 import spock.util.concurrent.PollingConditions
 
 /**
@@ -389,6 +390,8 @@ class UtilsSpec extends ScriptSpec {
     def "updateAllNextSteps leaves the filter alone when it creates no node"() {
         given:
         def unchangedNode = pageNode('Unchanged', "### Next Steps\n\n* Same step\n", ['Same step'])
+        addChild(toDoNode, text: Utils.DUE_TODAY_NODE_NAME)
+        addChild(toDoNode, text: Utils.PAST_DUE_NODE_NAME)
 
         expect:
         expectNextSteps("### Next Steps\n", [], ['Gone step'])
@@ -401,6 +404,11 @@ class UtilsSpec extends ScriptSpec {
     /** A ToDo item the way AddToToDo creates it: "item (page)" linking <docDir>/<page>.md. */
     private FakeNode toDoItem(String item, String page, FakeNode parentNode = toDoNode) {
         return addChild(parentNode, text: Utils.toDoItemText(item, page), linkFile: Utils.pageFile(docDir, page))
+    }
+
+    /** The ToDo children other than the Due Today / Past Due nodes updateAllNextSteps adds. */
+    private List<FakeNode> toDoItems() {
+        return toDoNode.children.findAll { !(it.text in [Utils.DUE_TODAY_NODE_NAME, Utils.PAST_DUE_NODE_NAME]) }
     }
 
     /**
@@ -426,7 +434,7 @@ class UtilsSpec extends ScriptSpec {
         expect:
         expectDeleted(gone)
         !kept.deleted
-        toDoNode.children == [kept]
+        toDoItems() == [kept]
     }
 
     def "updateAllNextSteps keeps a ToDo item listed beyond the three synced into the page node"() {
@@ -436,7 +444,7 @@ class UtilsSpec extends ScriptSpec {
         expect:
         expectNextSteps("### Next Steps\n\n* One\n* Two\n* Three\n* Four\n", ['One', 'Two', 'Three'])
         !fourth.deleted
-        toDoNode.children == [fourth]
+        toDoItems() == [fourth]
     }
 
     def "updateAllNextSteps leaves ToDo children alone that don't link a page"() {
@@ -448,7 +456,7 @@ class UtilsSpec extends ScriptSpec {
 
         expect:
         expectDeleted(stale)
-        toDoNode.children == [unlinked, external]
+        toDoItems() == [unlinked, external]
     }
 
     def "updateAllNextSteps deletes a ToDo item whose page file is missing"() {
@@ -457,7 +465,7 @@ class UtilsSpec extends ScriptSpec {
 
         expect:
         expectDeleted(orphan)
-        toDoNode.children.isEmpty()
+        toDoItems().isEmpty()
     }
 
     def "updateAllNextSteps only judges the direct children of the ToDo node"() {
@@ -474,5 +482,81 @@ class UtilsSpec extends ScriptSpec {
         !note.deleted
         !archived.deleted
         kept.children == [note]
+    }
+
+    // --- Tests for Due Today / Past Due of updateAllNextSteps ---
+
+    private static String daysFromToday(int days) {
+        return LocalDate.now().plusDays(days).format(Utils.DATE_FORMAT)
+    }
+
+    /** Runs updateAllNextSteps() and waits until ToDo > name holds the expected texts. */
+    private FakeNode expectDue(String name, List<String> expected) {
+        Utils.updateAllNextSteps(rootNode)
+
+        new PollingConditions(timeout: 2).eventually {
+            assert Utils.findChildByText(toDoNode, name)?.children*.text == expected
+        }
+        return Utils.findChildByText(toDoNode, name)
+    }
+
+    def "updateAllNextSteps creates the Due Today and Past Due nodes under ToDo when missing"() {
+        expect:
+        expectDue(Utils.PAST_DUE_NODE_NAME, []).children.isEmpty()
+        toDoNode.children*.text == [Utils.DUE_TODAY_NODE_NAME, Utils.PAST_DUE_NODE_NAME]
+        filterReapplications == [mindMap]
+    }
+
+    def "updateAllNextSteps files items due today and before today, linked to their page"() {
+        given:
+        def today = daysFromToday(0) + ' send the report'
+        def yesterday = daysFromToday(-1) + ' pay the bill'
+        def lastWeek = daysFromToday(-7) + ' call back'
+        // Beyond the three synced into the page node, and in the second page.
+        pageNode('Task', """### Next Steps
+
+* ${daysFromToday(1)} review
+* ${yesterday}
+* undated step
+* ${today}
+""")
+        pageNode('Other', "### Next Steps\n\n* ${lastWeek}\n* 26/13/40 not a date\n")
+
+        when:
+        def dueToday = expectDue(Utils.DUE_TODAY_NODE_NAME, [Utils.toDoItemText(today, 'Task')])
+        def pastDue = expectDue(Utils.PAST_DUE_NODE_NAME,
+                [Utils.toDoItemText(lastWeek, 'Other'), Utils.toDoItemText(yesterday, 'Task')])
+
+        then:
+        dueToday.children[0].link.file == Utils.pageFile(docDir, 'Task')
+        pastDue.children*.link*.file == [Utils.pageFile(docDir, 'Other'), Utils.pageFile(docDir, 'Task')]
+    }
+
+    def "updateAllNextSteps leaves out due items already among the ToDo node's children"() {
+        given:
+        def today = daysFromToday(0) + ' send the report'
+        def yesterday = daysFromToday(-1) + ' pay the bill'
+        pageNode('Task', "### Next Steps\n\n* ${today}\n* ${yesterday}\n")
+        toDoItem(yesterday, 'Task')
+
+        expect:
+        expectDue(Utils.PAST_DUE_NODE_NAME, [])
+        expectDue(Utils.DUE_TODAY_NODE_NAME, [Utils.toDoItemText(today, 'Task')])
+    }
+
+    def "updateAllNextSteps replaces outdated due items and leaves matching ones alone"() {
+        given:
+        def yesterday = daysFromToday(-1) + ' pay the bill'
+        pageNode('Task', "### Next Steps\n\n* ${yesterday}\n", [yesterday])
+        def dueToday = addChild(toDoNode, text: Utils.DUE_TODAY_NODE_NAME)
+        addChild(dueToday, text: Utils.toDoItemText('done already', 'Task'))
+        def pastDue = addChild(toDoNode, text: Utils.PAST_DUE_NODE_NAME)
+        def existing = toDoItem(yesterday, 'Task', pastDue)
+
+        expect:
+        expectDue(Utils.DUE_TODAY_NODE_NAME, [])
+        pastDue.children == [existing]
+        toDoNode.children == [dueToday, pastDue]
+        filterReapplications.isEmpty()
     }
 }

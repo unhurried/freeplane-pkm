@@ -7,7 +7,7 @@ Freeplane PKM is a project for building a personal knowledge management (PKM) sy
 - **Document Management**: Manage links between mind map nodes and Markdown files/directories
 - **Full-Text Document Search**: Indexed, keyword search across your Markdown, PDF and Office document files - see [Full-Text Document Search](#full-text-document-search) below
 - **Mind Map Search and Filtering**: Search and filter mind map nodes by conditions
-- **Task Management**: Reflect tasks written in Markdown files into the mind map; ToDo items whose task has been removed from its page are dropped automatically
+- **Task Management**: Reflect tasks written in Markdown files into the mind map; ToDo items whose task has been removed from its page are dropped automatically; Next Steps items starting with a `yy/MM/dd` due date of today or earlier are collected under ToDo > Due Today / Past Due unless already in ToDo
 
 ## Installation
 

@@ -1,4 +1,7 @@
 import groovy.transform.Field
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import javax.swing.SwingUtilities
 
 @Field static final DOC_TARGET_PAGE = 'page'
@@ -8,6 +11,9 @@ import javax.swing.SwingUtilities
 @Field static final String DATE_FORMAT = 'yy/MM/dd'
 /** The node under the root that holds the task list. */
 @Field static final String TODO_NODE_NAME = 'ToDo'
+/** root > ToDo children collecting the Next Steps items due today / before today (see updateAllNextSteps). */
+@Field static final String DUE_TODAY_NODE_NAME = 'Due Today'
+@Field static final String PAST_DUE_NODE_NAME = 'Past Due'
 
 @Field private static final String CONFIG_NODE_NAME = 'config'
 @Field private static final String DOC_DIR_PATH_KEY = 'docDirPath'
@@ -39,6 +45,17 @@ def static loadDocDir(node) {
 
 def static findChildByText(parentNode, String text) {
     return parentNode.children.find { it.text == text }
+}
+
+/** The due date a text starts with ("yy/MM/dd ..."), or null when it has none or it isn't a valid date. */
+def static LocalDate dueDateOf(String text) {
+    def dueDateStr = text.find(/^\d\d\/\d\d\/\d\d/)
+    if (dueDateStr == null) return null
+    try {
+        return LocalDate.parse(dueDateStr, DateTimeFormatter.ofPattern(DATE_FORMAT))
+    } catch (DateTimeParseException ignored) {
+        return null
+    }
 }
 
 /** The text of a root > ToDo item copied from a page: "item (page)". */
@@ -224,10 +241,13 @@ def static updateNextStepsAndIndex(node) {
 /**
  * Syncs the "### Next Steps" list items of every page in the map into the page
  * node's children, and drops the root > ToDo items (see AddToToDo.groovy) whose
- * text no longer appears among their page's Next Steps. Files are read on a
- * background thread; the node mutations are then applied in one batch on the
- * Swing EDT, and only for pages whose items actually differ from the current
- * children, so an unchanged map stays untouched (and unmodified).
+ * text no longer appears among their page's Next Steps. Then fills root > ToDo >
+ * Due Today / Past Due (created when missing) with the Next Steps items - all of
+ * them, not just the synced three - due today / before today that aren't among
+ * the ToDo node's direct children, in AddToToDo's "item (page)" form. Files are
+ * read on a background thread; the node mutations are then applied in one batch
+ * on the Swing EDT, and only for nodes whose items actually differ from the
+ * current children, so an unchanged map stays untouched (and unmodified).
  */
 def static updateAllNextSteps(node, File docDir = null) {
     def map = node.mindMap
@@ -245,12 +265,14 @@ def static updateAllNextSteps(node, File docDir = null) {
             if (items != null) nextSteps[target] = items.take(MAX_NEXT_STEPS)
         }
         def staleToDoItems = collectStaleToDoItems(root, dir, itemsByFile)
+        def dueItems = collectDueItems(nextSteps.keySet(), dir, itemsByFile, LocalDate.now())
         SwingUtilities.invokeLater {
             def changed = nextSteps.findAll { target, lines -> target.children*.text != lines }
             changed.each { target, lines -> applyNextSteps(target, lines) }
             staleToDoItems*.delete()
+            def dueCreated = applyDueItems(root, dir, dueItems)
             // Only creating nodes leaves the filter stale (see reapplyFilter).
-            if (changed.any { target, lines -> lines }) reapplyFilter(map)
+            if (dueCreated || changed.any { target, lines -> lines }) reapplyFilter(map)
         }
     }
 }
@@ -336,6 +358,59 @@ private static List collectStaleToDoItems(root, File docDir, Map<File, List<Stri
         def items = itemsByFile[linkedFile]
         return items == null || !items.any { toDoItemText(it, pageName) == item.text }
     }
+}
+
+/**
+ * The Next Steps items of the given page nodes (each page once) due on or before
+ * today, as [(DUE_TODAY_NODE_NAME | PAST_DUE_NODE_NAME): [[page:, item:, dueDate:]]],
+ * past due items ordered by due date.
+ */
+private static Map<String, List<Map>> collectDueItems(
+        Collection pageNodes, File docDir, Map<File, List<String>> itemsByFile, LocalDate today) {
+    def dueToday = []
+    def pastDue = []
+    for (page in pageNodes*.text.unique()) {
+        for (item in itemsByFile[pageFile(docDir, page)] ?: []) {
+            def dueDate = dueDateOf(item)
+            def entry = [page: page, item: item, dueDate: dueDate]
+            if (dueDate == today) dueToday << entry
+            else if (dueDate?.isBefore(today)) pastDue << entry
+        }
+    }
+    return [(DUE_TODAY_NODE_NAME): dueToday, (PAST_DUE_NODE_NAME): pastDue.sort(false) { it.dueDate }]
+}
+
+/**
+ * Makes root > ToDo > Due Today / Past Due (created when missing) hold dueItems
+ * (see collectDueItems), minus the ones already among the ToDo node's direct
+ * children. Returns whether any node was created. Runs on the EDT.
+ */
+private static boolean applyDueItems(root, File docDir, Map<String, List<Map>> dueItems) {
+    def toDoNode = findChildByText(root, TODO_NODE_NAME)
+    if (!toDoNode) return false
+
+    def listed = toDoNode.children.collect { [it.text, it.link.file] } as Set
+    def created = false
+    dueItems.each { name, items ->
+        def pending = items.findAll { !listed.contains([toDoItemText(it.item, it.page), pageFile(docDir, it.page)]) }
+        def holder = findChildByText(toDoNode, name)
+        if (!holder) {
+            holder = toDoNode.createChild()
+            holder.text = name
+            created = true
+        }
+        def texts = pending.collect { toDoItemText(it.item, it.page) }
+        if (holder.children*.text == texts) return
+
+        deleteChildren(holder)
+        pending.each {
+            def child = holder.createChild()
+            child.text = toDoItemText(it.item, it.page)
+            child.link.file = pageFile(docDir, it.page)
+            created = true
+        }
+    }
+    return created
 }
 
 private static void applyNextSteps(node, List<String> lines) {
