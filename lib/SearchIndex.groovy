@@ -215,7 +215,8 @@ def static void updateIndex(File docDir) {
 }
 
 /**
- * Files matching every whitespace-separated keyword (AND, case-insensitive) in
+ * Files matching every whitespace-separated keyword (AND, case-insensitive; a
+ * full-width space U+3000 separates keywords too) in
  * content or file name, restricted to scope and ordered by sort. Both apply in
  * the query itself, so maxResults is the top of the filtered, sorted list.
  * Keywords are literal text, never query syntax. Empty when the index doesn't
@@ -223,7 +224,7 @@ def static void updateIndex(File docDir) {
  */
 def static List<SearchHit> search(File docDir, String queryText, SearchSort sort = SearchSort.RELEVANCE,
                                   SearchScope scope = SearchScope.ALL, int maxResults = DEFAULT_MAX_RESULTS) {
-    def keywords = queryText?.tokenize() ?: []
+    def keywords = queryText?.split(/[\s\u3000]+/)?.findAll() ?: []
     if (!keywords) return []
 
     def indexDir = luceneDir(docDir)

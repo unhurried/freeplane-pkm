@@ -301,6 +301,22 @@ class SearchIndexSpec extends Specification {
         hits[0].relativePath == 'Alpha.md'
     }
 
+    def "search treats a full-width space as a keyword separator"() {
+        given:
+        // As one keyword, "機械学習　学ぶ" would be a phrase, which this file
+        // doesn't contain ("について" sits between the words).
+        textFile('Alpha.md', '機械学習について学ぶ')
+        textFile('Beta.md', '機械学習について')
+        SearchIndex.updateIndex(docDir)
+
+        when:
+        def hits = SearchIndex.search(docDir, '機械学習　学ぶ')
+
+        then:
+        hits.size() == 1
+        hits[0].relativePath == 'Alpha.md'
+    }
+
     def "updateIndex rebuilds the whole index when the schema version on disk is stale"() {
         given:
         textFile('Alpha.md', '機械学習の勉強をした。')
