@@ -1,0 +1,20 @@
+# Development toolchain for `mise install`. Keep the versions in sync with
+# .github/workflows/package-addon.yml (java-version, gradle-version) and with
+# source/targetCompatibility in build.gradle.
+[tools]
+java = "temurin-17"
+gradle = "9.6.1"
+
+# Extra arguments go to Gradle, e.g. `mise run test --tests UtilsSpec`
+# or `mise run package -PaddonVersion=v1.0.0`.
+[tasks.test]
+description = "Run the Spock tests"
+run = "gradle test"
+
+[tasks.check]
+description = "Run tests, CodeNarc and tools/check-conventions.sh (the definition of done)"
+run = "gradle check"
+
+[tasks.package]
+description = "Build build/addon/freeplane-pkm-<version>.addon.mm"
+run = "gradle packageAddon"

@@ -16,7 +16,7 @@ gradle packageAddon              # produces build/addon/freeplane-pkm-<version>.
 gradle packageAddon -PaddonVersion=v1.0.0
 ```
 
-Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle` in sync with `java-version` in `.github/workflows/package-addon.yml`. Releases are cut by pushing a `v*` tag.
+Java 17 is pinned; keep `source/targetCompatibility` in `build.gradle`, `java-version` in `.github/workflows/package-addon.yml` and `java` in `mise.toml` in sync (likewise the Gradle version between the workflow and `mise.toml`). `mise install` sets up the toolchain; `mise run test|check|package` wrap the Gradle commands above. Releases are cut by pushing a `v*` tag.
 
 ## Structure
 

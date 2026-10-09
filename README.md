@@ -54,15 +54,16 @@ Run Tools → Scripts → Freeplane PKM → Search (shortcut `F6`) to open a sea
 - **Gradle**: 7.0 or later (can be installed automatically with the Gradle wrapper)
 - **Freeplane**: Latest version (used as the script runtime environment)
 
-### Dev Container
+### mise
 
-`.devcontainer/` is the network-isolated Claude Code dev container from [devcontainer-claude-code](https://github.com/unhurried/devcontainer-claude-code), plus JDK 17 and Gradle. Open the repository with the VS Code Dev Containers extension (`Dev Containers: Reopen in Container`).
+[mise](https://mise.jdx.dev/) installs the pinned JDK and Gradle from `mise.toml` and provides shortcuts for the Gradle tasks:
 
-- The container has no route to the internet; everything goes through a squid proxy that allows only the hosts in `.devcontainer/proxy/allowed-domains.txt` (GitHub, Maven Central and the Gradle plugin portal for this build, Anthropic, VS Code, ...). Add a host there and rebuild; to switch the allowlist off, copy `.devcontainer/.env.example` to `.devcontainer/.env`, set `PROXY_MODE=open` and rebuild.
-- Gradle does not read `HTTPS_PROXY`, so `post-create.sh` writes the proxy into `~/.gradle/gradle.properties` (a persisted volume, like `~/.claude` and the other download caches).
-- Claude Code's user-scope settings and skills come from `.devcontainer/claude/` and are synced on every container start (`sync-claude-config.sh`); the project-scope ones live in `.claude/`.
-
-See the source repository's README for the design notes, the isolation tests and troubleshooting.
+```bash
+mise install                              # JDK 17 (Temurin) and Gradle
+mise run check                            # gradle check
+mise run test --tests UtilsSpec           # extra arguments are passed to Gradle
+mise run package -PaddonVersion=v1.0.0    # gradle packageAddon
+```
 
 ### Build and Test
 
